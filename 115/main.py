@@ -2,7 +2,7 @@
 # DOC ATHLETIC TRAIN SMART EVOLUTION SOFTWARE - FUSSBALL (Version 115)
 # ChatGPT überarbeitet auf Grundlage 23.8.5; Modul 1
 # Überarbeitet: Soll/Ist, 25 Quellenpläne, Folgeempfehlungen, Makrozyklen, Sprungtest-Verlauf
-# Stand: 23.09.2026 – Korrektur: Profilwerte zusammen mit Soll-/Ist-Plan und Sprungtest speichern
+# Stand: 23.09.2026 – Testtabelle, CSV-/Excel-Import und Speicherkorrektur
 # ============================================================================
 
 import streamlit as st
@@ -19,6 +19,11 @@ import hmac
 from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 from contextlib import contextmanager, closing
+import csv
+import io
+import re
+import unicodedata
+from zipfile import ZipFile, BadZipFile
 
 st.set_page_config(page_title="Doc Athletic – Fußball · 115", layout="wide", initial_sidebar_state="expanded")
 
@@ -202,7 +207,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = "22.09.2026 · Fußball 1 – Komplextraining / Fußball 2 – Speed and Jump"
+BUILD_STAND = "23.09.2026 · Testtabelle und Dateiimport · Speicherkorrektur enthalten"
 
 
 # Version 115: agreed working values; saved plans remain immutable until edited.
@@ -718,7 +723,7 @@ def build_tempo_table(t60, t150, source150, references, test_distance, test_seco
 JUMP_TESTS = {"hop_links": "Fünfer-Hop links", "hop_rechts": "Fünfer-Hop rechts", "schluss": "Fünfer-Schlusssprung"}
 
 def jump_summary(test):
-    best = {key: max(test[key], default=0) for key in JUMP_TESTS}
+    best = {key: (test.get("protokollwerte", {}).get(key) or 0) if "protokollwerte" in test else max(test[key], default=0) for key in JUMP_TESTS}
     left, right = best["hop_links"], best["hop_rechts"]
     both = left > 0 and right > 0
     return {"Testdatum": test["datum"],
@@ -741,6 +746,13 @@ def validate_jump_tests(tests):
             raise ValueError("Ungültiges Testdatum.") from None
         if not isinstance(test.get("notizen"), str) or len(test["notizen"]) > 4000:
             raise ValueError("Ungültige Techniknotizen.")
+        if "protokollwerte" in test:
+            values = test["protokollwerte"]
+            if (not isinstance(values, dict) or set(values) != set(JUMP_TESTS)
+                    or not any(v is not None for v in values.values())
+                    or any(v is not None and (type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= 100) for v in values.values())):
+                raise ValueError("Ungültige Sprung-Protokollwerte.")
+            continue
         for key in JUMP_TESTS:
             values = test.get(key)
             if not isinstance(values, list) or len(values) != 3 or any(
@@ -748,6 +760,636 @@ def validate_jump_tests(tests):
                 raise ValueError("Je Sprungtest sind drei Weiten zwischen 0 und 100 Metern erforderlich; 0 bedeutet nicht gewertet.")
         if not any(v > 0 for key in JUMP_TESTS for v in test[key]):
             raise ValueError("Mindestens eine gültige Sprungweite eintragen.")
+
+# Test capture is separate from profile editing. Empty measurements stay absent.
+FIELD_METRICS = {
+    "sprint60": "60 m (s)", "shuttle": "Shuttlezeit (s)",
+    "hop_links": "5er-Hop links (m)", "hop_rechts": "5er-Hop rechts (m)",
+    "schluss": "5er-Schlusssprung (m)",
+}
+FIELD_SHUTTLE_MODES = ["Gemessen", "Gerundeter Gruppenwert", "Nicht angegeben"]
+FIELD_COLUMNS = ["Name auf Bogen", "Zuordnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz"]
+FIELD_MAX_ROWS = 1000
+SHUTTLE_FORMS = {"Einfach": 1, "Zweifach": 2, "Dreifach": 3}
+
+
+def shuttle_definition(form, distance):
+    if form not in SHUTTLE_FORMS:
+        raise ValueError('Bitte Shuttle-Test einfach, zweifach oder dreifach auswählen.')
+    way = field_number(distance, 'Strecke je Weg')
+    if way is None:
+        raise ValueError('Für Shuttle bitte die Strecke je Hin- oder Rückweg eintragen.')
+    return {'form': form, 'weg_m': way}
+
+
+def shuttle_description(config):
+    if not config:
+        return 'Shuttle-Anordnung noch offen'
+    phases = 2 * SHUTTLE_FORMS[config['form']]
+    return f"{config['form']}: {phases} × {config['weg_m']:g} m = {phases * config['weg_m']:g} m gesamt; {phases} Beschleunigungsphasen"
+
+
+def shuttle_inputs(prefix, saved=None):
+    saved = saved or {}
+    a, b = st.columns(2)
+    options = ['Bitte wählen'] + list(SHUTTLE_FORMS)
+    form = a.selectbox('Shuttle-Test', options, index=options.index(saved.get('form', 'Bitte wählen')), key=prefix+'_form')
+    way = b.text_input('Strecke je Hin- oder Rückweg (m)', value=str(saved.get('weg_m','')), key=prefix+'_way')
+    st.caption('Einfach = hin und zurück (2 Wege); zweifach = 4 Wege; dreifach = 6 Wege. Die eingegebene Strecke gilt für einen Weg.')
+    try:
+        result = shuttle_definition(form, way)
+        st.info(shuttle_description(result))
+        return result
+    except ValueError as exc:
+        if form != 'Bitte wählen' and way:
+            st.warning(str(exc))
+        return None
+
+
+def field_text(value):
+    if value is None or (not isinstance(value, (str, list, dict)) and pd.isna(value)):
+        return ""
+    return str(value).strip()
+
+
+def field_number(value, label):
+    raw = field_text(value)
+    if not raw:
+        return None
+    if type(value) is bool or not re.fullmatch(r"\d+(?:[.,]\d{1,4})?", raw):
+        raise ValueError(f"{label}: Bitte eine Zahl mit Komma oder Punkt eingeben; fehlende Werte leer lassen.")
+    number = float(raw.replace(",", "."))
+    upper = 10000 if label == 'Strecke je Weg' else 1800 if label in (FIELD_METRICS['sprint60'], FIELD_METRICS['shuttle']) else 100
+    if not math.isfinite(number) or not 0 < number <= upper:
+        raise ValueError(f"{label}: Der Wert muss größer als 0 und höchstens {upper} sein. 0 bitte durch ein leeres Feld ersetzen.")
+    return number
+
+
+def field_identity_map(kader):
+    # A sport-qualified label also distinguishes equal names in legacy sections.
+    return {f"{name} [{sport}]": (sport, name) for sport, name in roster_options(kader)}
+
+
+def field_name_key(name):
+    return " ".join(unicodedata.normalize("NFC", name).casefold().split())
+
+
+def field_match(name, sport, identities):
+    candidates = [label for label, (s, n) in identities.items()
+                  if field_name_key(n) == field_name_key(name) and (not sport or s == sport)]
+    return candidates[0] if len(candidates) == 1 else ""
+
+
+def field_empty_row(name="", identity=""):
+    return {"Name auf Bogen": name, "Zuordnung": identity,
+            **{label: "" for label in FIELD_METRICS.values()},
+            "Shuttle-Angabe": "Nicht angegeben", "Notiz": ""}
+
+
+def field_display_frame(rows):
+    frame = pd.DataFrame(rows)
+    for label in FIELD_METRICS.values():
+        if label in frame:
+            frame[label] = frame[label].map(lambda v: '' if pd.isna(v) else str(v).replace('.',','))
+    return frame
+
+
+def field_sync_grid(key):
+    # Commit cell deltas to a separate draft before any view/column change.
+    # The widget's own diff is not the authoritative store for hidden columns.
+    draft = deepcopy(st.session_state.get('field_draft', []))
+    delta = st.session_state.get(key, {}).get('edited_rows', {})
+    for index, changes in delta.items():
+        index = int(index)
+        if 0 <= index < len(draft):
+            for label, value in changes.items():
+                if label in FIELD_COLUMNS and label != 'Name auf Bogen':
+                    draft[index][label] = field_text(value)
+    st.session_state.field_draft = draft
+    st.session_state.field_current_rows = deepcopy(draft)
+
+
+def field_date(value):
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(field_text(value), fmt).date().isoformat()
+        except ValueError:
+            pass
+    raise ValueError("Testdatum als TT.MM.JJJJ oder JJJJ-MM-TT angeben.")
+
+
+def field_csv(rows, datum, bogen, identities, shuttle=None, default_mode='Nicht angegeben'):
+    stream = io.StringIO(newline="")
+    labels = ["Name", "Kaderbereich", "Datum", "Testbezeichnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz", "Shuttleform", "Strecke je Weg (m)"]
+    writer = csv.DictWriter(stream, labels, delimiter=";", lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        sport, name = identities.get(row.get("Zuordnung"), ("", row.get("Name auf Bogen", "")))
+        record = {"Name": name, "Kaderbereich": sport, "Datum": datum, "Testbezeichnung": bogen,
+                  **{k: field_text(row.get(k)) for k in labels[4:]},
+                  'Shuttleform': (shuttle or {}).get('form',''), 'Strecke je Weg (m)': (shuttle or {}).get('weg_m','')}
+        if record.get('Shuttle-Angabe') in ('','Nicht angegeben'):
+            record['Shuttle-Angabe'] = default_mode
+        # Prevent spreadsheet formula evaluation when a note/name starts with = etc.
+        record = {k: ("'" + str(v) if str(v).lstrip().startswith(("=", "+", "-", "@")) else v) for k, v in record.items()}
+        writer.writerow(record)
+    return stream.getvalue().encode("utf-8-sig")
+
+
+def read_field_file(data, filename, identities):
+    if len(data) > 10_000_000:
+        raise ValueError("Bitte höchstens 10 MB je Tabelle hochladen.")
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".csv":
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = data.decode("cp1252")
+        if text.lower().startswith("sep="):
+            text = text.split("\n", 1)[1]
+        header = text.splitlines()[0] if text.splitlines() else ""
+        separator = ";" if ";" in header else "\t" if "\t" in header else ","
+        table = list(csv.reader(io.StringIO(text), delimiter=separator))
+    elif suffix == ".xlsx":
+        from openpyxl import load_workbook
+        try:
+            with ZipFile(io.BytesIO(data)) as archive:
+                if sum(i.file_size for i in archive.infolist()) > 50_000_000:
+                    raise ValueError("Die entpackte Excel-Datei ist zu groß.")
+            book = load_workbook(io.BytesIO(data), read_only=True, data_only=False, keep_links=False)
+            sheets = [s for s in book.worksheets if s.sheet_state == 'visible']
+            if len(sheets) != 1:
+                book.close()
+                raise ValueError("Bitte eine Excel-Datei mit genau einem sichtbaren Tabellenblatt verwenden.")
+            sheet = sheets[0]
+            if (sheet.max_column or 0) > 40 or (sheet.max_row or 0) > FIELD_MAX_ROWS + 1:
+                book.close()
+                raise ValueError("Excel-Tabelle: höchstens 1000 Personen und 40 Spalten.")
+            table = list(sheet.iter_rows(max_row=min(sheet.max_row or FIELD_MAX_ROWS+2, FIELD_MAX_ROWS+2),
+                                         max_col=min(sheet.max_column or 41,41),values_only=True))
+            book.close()
+        except (BadZipFile, KeyError, OSError) as exc:
+            raise ValueError("Die Excel-Datei konnte nicht gelesen werden.") from exc
+    else:
+        raise ValueError("Zum direkten Import bitte CSV oder XLSX verwenden. PDF und Fotos können als Vorlage angezeigt werden.")
+    if not table or len(table) > FIELD_MAX_ROWS + 1:
+        raise ValueError("Die Tabelle ist leer oder enthält mehr als 1000 Personen.")
+    headers = [field_text(v) for v in table[0]]
+    # Ignore genuinely empty trailing columns, never populated unknown columns.
+    while headers and not headers[-1] and all(len(r) < len(headers) or not field_text(r[len(headers)-1]) for r in table[1:]):
+        headers.pop()
+    allowed = {"Name", "Kaderbereich", "Datum", "Testbezeichnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz", "Shuttleform", "Strecke je Weg (m)"}
+    if len(set(headers)) != len(headers) or "Name" not in headers or set(headers) - allowed:
+        raise ValueError("Spaltenüberschriften passen nicht. Bitte die CSV-Vorlage verwenden; sie lässt sich auch in Excel öffnen. Erlaubt: " + ", ".join(sorted(allowed)))
+    if not set(FIELD_METRICS.values()) & set(headers):
+        raise ValueError("Keine Testwert-Spalte gefunden.")
+    rows, dates, titles, shuttles = [], set(), set(), set()
+    for index, values in enumerate(table[1:], 2):
+        if not any(field_text(v) for v in values):
+            continue
+        if len(values) > len(headers) and any(field_text(v) for v in values[len(headers):]):
+            raise ValueError(f"Zeile {index}: zusätzliche Werte ohne Spaltenüberschrift.")
+        record = dict(zip(headers, values))
+        for k, v in list(record.items()):
+            if isinstance(v, str) and v.startswith("'") and v[1:].lstrip().startswith(("=", "+", "-", "@")):
+                record[k] = v[1:]
+        name = field_text(record.get("Name"))
+        if not name or len(name) > 120:
+            raise ValueError(f"Zeile {index}: Namen bis 120 Zeichen eintragen.")
+        row = field_empty_row(name, field_match(name, field_text(record.get("Kaderbereich")), identities))
+        for label in FIELD_METRICS.values():
+            # Preserve suspect input for manual correction in the table.
+            row[label] = field_text(record.get(label))
+        row["Shuttle-Angabe"] = field_text(record.get("Shuttle-Angabe")) or "Nicht angegeben"
+        row["Notiz"] = field_text(record.get("Notiz"))
+        if field_text(record.get("Datum")):
+            dates.add(field_date(record['Datum']))
+        if field_text(record.get("Testbezeichnung")):
+            titles.add(field_text(record['Testbezeichnung']))
+        if field_text(record.get('Shuttleform')) or field_text(record.get('Strecke je Weg (m)')):
+            config = shuttle_definition(field_text(record.get('Shuttleform')), record.get('Strecke je Weg (m)'))
+            shuttles.add((config['form'],config['weg_m']))
+        rows.append(row)
+    if len(dates) > 1 or len(titles) > 1 or len(shuttles) > 1:
+        raise ValueError("Bitte pro Import ein Testdatum, eine Testbezeichnung und eine Shuttle-Anordnung verwenden.")
+    if not rows:
+        raise ValueError("Die Datei enthält keine Personen.")
+    shuttle = dict(zip(('form','weg_m'),next(iter(shuttles)))) if shuttles else None
+    return rows, next(iter(dates), None), next(iter(titles), None), shuttle
+
+
+def validate_field_tests(tests):
+    if not isinstance(tests, list) or len(tests) > 10000:
+        raise ValueError("Ungültiger Feldtest-Verlauf.")
+    ids = set()
+    for event in tests:
+        if not isinstance(event, dict):
+            raise ValueError("Ungültiger Feldtest.")
+        field_date(event.get('datum'))
+        if not isinstance(event.get('id'), str) or event['id'] in ids:
+            raise ValueError("Doppelter oder ungültiger Feldtest.")
+        ids.add(event['id'])
+        if not isinstance(event.get('bogen'), str) or not 0 < len(event['bogen']) <= 120:
+            raise ValueError("Testbezeichnung prüfen.")
+        values = event.get('werte')
+        if not isinstance(values, dict) or set(values) - set(FIELD_METRICS) or not values:
+            raise ValueError("Ungültige Testwerte.")
+        for k, v in values.items():
+            if field_number(v, FIELD_METRICS[k]) is None:
+                raise ValueError("Fehlende Werte dürfen nicht als Messergebnis gespeichert werden.")
+        if 'shuttle' in values:
+            config = event.get('shuttle')
+            if not isinstance(config, dict) or shuttle_definition(config.get('form'),config.get('weg_m')) != config:
+                raise ValueError('Shuttle-Anordnung prüfen.')
+        if event.get('shuttle_angabe') not in FIELD_SHUTTLE_MODES:
+            raise ValueError("Herkunft der Shuttlezeit prüfen.")
+        if not isinstance(event.get('notiz'), str) or len(event['notiz']) > 4000:
+            raise ValueError("Testnotiz zu lang.")
+        history = event.get('aenderungen', [])
+        if not isinstance(history, list) or len(history) > 200:
+            raise ValueError("Zu viele Korrekturen dieses Tests.")
+        for prior in history:
+            if not isinstance(prior, dict) or 'aenderungen' in prior:
+                raise ValueError("Ungültiger Korrekturverlauf.")
+            validate_field_tests([prior])
+
+
+def prepare_field_batch(kader, rows, datum, bogen, correct=False, use_reference=False, shuttle=None, default_mode='Gemessen'):
+    """Pure preview. Caller commits the entire validated candidate with its revision."""
+    datum = field_date(datum)
+    bogen = field_text(bogen)
+    if not bogen or len(bogen) > 120:
+        raise ValueError("Bitte eine Testbezeichnung mit 1 bis 120 Zeichen angeben.")
+    if not rows or len(rows) > FIELD_MAX_ROWS:
+        raise ValueError("Bitte 1 bis 1000 Personen in der Tabelle erfassen.")
+    identities = field_identity_map(kader)
+    updated = deepcopy(kader)
+    seen, errors, preview = set(), [], []
+    changed, skipped = 0, 0
+    stamp = datetime.now(timezone.utc).isoformat()
+    for index, row in enumerate(rows, 1):
+        try:
+            values = {k: field_number(row.get(label), label) for k, label in FIELD_METRICS.items()}
+            values = {k: v for k, v in values.items() if v is not None}
+            if not values:
+                skipped += 1
+                continue
+            identity = field_text(row.get('Zuordnung'))
+            if identity not in identities:
+                raise ValueError("Bitte eine vorhandene Person in ‚Zuordnung‘ auswählen.")
+            if identity in seen:
+                raise ValueError("Diese Person ist mehrfach enthalten. Bitte die Zeilen zusammenführen.")
+            seen.add(identity)
+            sport, name = identities[identity]
+            note = field_text(row.get('Notiz'))
+            mode = field_text(row.get('Shuttle-Angabe')) or 'Nicht angegeben'
+            if mode == 'Nicht angegeben':
+                mode = default_mode
+            if mode not in FIELD_SHUTTLE_MODES or len(note) > 4000:
+                raise ValueError("Shuttle-Angabe oder Notiz prüfen.")
+            if 'shuttle' in values:
+                if not shuttle:
+                    raise ValueError('Für die Shuttlezeit bitte Shuttle-Test und Strecke je Weg festlegen.')
+                shuttle = shuttle_definition(shuttle.get('form'),shuttle.get('weg_m'))
+            rec = updated[sport][name]
+            event_id = hashlib.sha256(json.dumps([datum, bogen.casefold()], ensure_ascii=False).encode()).hexdigest()
+            events = rec.setdefault('feldtests', [])
+            old = next((e for e in events if e['id'] == event_id), None)
+            conflicting = [FIELD_METRICS[k] for k, v in values.items() if old and k in old['werte'] and old['werte'][k] != v]
+            if old and 'shuttle' in old['werte'] and 'shuttle' in values and mode != 'Nicht angegeben' and mode != old['shuttle_angabe']:
+                conflicting.append('Shuttle-Angabe')
+            if old and 'shuttle' in old['werte'] and 'shuttle' in values and old.get('shuttle') != shuttle:
+                conflicting.append('Shuttle-Anordnung (für einen anderen Test bitte eine eigene Testbezeichnung verwenden)')
+            if old and note and old['notiz'] and note != old['notiz']:
+                conflicting.append('Notiz')
+            if conflicting and not correct:
+                raise ValueError('Bereits gespeichert, abweichend: ' + ', '.join(conflicting) + '. Korrektur ausdrücklich auswählen oder Eingabe berichtigen.')
+            event = deepcopy(old) if old else {'id': event_id, 'datum': datum, 'bogen': bogen, 'werte': {}, 'shuttle_angabe': 'Nicht angegeben', 'notiz': '', 'aenderungen': []}
+            event['werte'].update(values)
+            if 'shuttle' in values:
+                event['shuttle'] = deepcopy(shuttle)
+            if 'shuttle' in values and mode != 'Nicht angegeben':
+                event['shuttle_angabe'] = mode
+            if note:
+                event['notiz'] = note
+            change = old is None or any(event.get(k) != old.get(k) for k in ('werte', 'shuttle_angabe', 'notiz', 'shuttle'))
+            reference_change = False
+            if use_reference and 'sprint60' in values:
+                if not 6 <= values['sprint60'] <= 15:
+                    raise ValueError('60-m-Referenz der bisherigen Planung erlaubt 6 bis 15 s. Als Testwert ist die Zeit ohne Referenzübernahme speicherbar.')
+                reference_change = rec['t_60'] != values['sprint60']
+                rec['t_60'] = values['sprint60']
+                if rec.get('t_150_quelle') == 'berechnet':
+                    rec['t_150'] = round(rec['t_60'] * 2.375, 2)
+            if change:
+                if old:
+                    prior = deepcopy(old)
+                    prior.pop('aenderungen', None)
+                    event['aenderungen'].append(prior)
+                    events[events.index(old)] = event
+                else:
+                    events.append(event)
+                event['gespeichert_am'] = stamp
+                jumps = {k: event['werte'].get(k) for k in JUMP_TESTS}
+                if any(v is not None for v in jumps.values()):
+                    tests = rec.setdefault('sprungtests', [])
+                    test = {'datum': datum, 'notizen': ('Protokollwerte; Einzelversuche nicht angegeben. ' + event['notiz']).strip()[:4000],
+                            'protokollwerte': jumps, 'feldtest_id': event_id}
+                    existing_jump = next((j for j in tests if j.get('feldtest_id') == event_id), None)
+                    if existing_jump:
+                        tests[tests.index(existing_jump)] = test
+                    else:
+                        tests.append(test)
+            status = ('Korrektur' if conflicting else 'Ergänzung' if old else 'Neu') if change else 'Bereits gespeichert'
+            if reference_change:
+                status += '; 60-m-Referenz geändert'
+            changed += bool(change or reference_change)
+            preview.append({'Person': name, 'Status': status,
+                            **{label: values.get(k) for k, label in FIELD_METRICS.items()},
+                            'Shuttle-Test':shuttle_description(event.get('shuttle')) if 'shuttle' in event['werte'] else '',
+                            'Shuttle-Angabe': event['shuttle_angabe'], 'Notiz': event['notiz']})
+        except (ValueError, TypeError) as exc:
+            errors.append(f"Zeile {index} ({field_text(row.get('Name auf Bogen'))}): {exc}")
+    if errors:
+        raise ValueError('\n'.join(errors[:30]))
+    if not preview:
+        raise ValueError('Noch keine Testwerte eingetragen. Leere Zeilen werden nicht gespeichert.')
+    validate_kader(updated)
+    return updated, preview, changed, skipped
+
+
+def field_sheet_pdf(names, datum, title, shuttle=None):
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    out = io.BytesIO()
+    doc = SimpleDocTemplate(out, pagesize=A4, leftMargin=15*mm, rightMargin=15*mm, topMargin=14*mm, bottomMargin=14*mm)
+    style = ParagraphStyle('field', fontName='Helvetica', fontSize=10, leading=13)
+    header = ParagraphStyle('header', parent=style, fontName='Helvetica-Bold', fontSize=17, leading=21)
+    names = names or ['']*6
+    story = []
+    for start in range(0, len(names), 6):
+        if start:
+            story.append(PageBreak())
+        chunk = names[start:start+6]
+        story += [Paragraph('Doc Athletic - Testprotokoll', header), Spacer(1, 3*mm),
+                  Paragraph(escape(title) + ' | Datum: ' + escape(datum), style),
+                  Spacer(1, 3*mm), Paragraph('Groß und eindeutig schreiben. Fehlende Werte leer lassen. Korrekturen daneben neu eintragen.', style),
+                  Paragraph(escape(shuttle_description(shuttle)),style), Spacer(1, 5*mm)]
+        for section, labels, widths in [
+            ('Laufzeiten', ['Name', '60 m (s)', 'Shuttlezeit (s)'], [80*mm, 45*mm, 55*mm]),
+            ('Sprungweiten: jeweils fünf Sprünge, Gesamtweite in Metern', ['Name', '5er-Hop links\n(m)', '5er-Hop rechts\n(m)', '5er-Schluss\n(m)'], [66*mm, 38*mm, 38*mm, 38*mm])]:
+            story += [Paragraph(section, style), Spacer(1, 2*mm)]
+            content = [[Paragraph(escape(x).replace('\n','<br/>'), style) for x in labels]]
+            content += [[Paragraph(escape(n), style)] + ['']*(len(labels)-1) for n in chunk]
+            table = Table(content, colWidths=widths, rowHeights=[14*mm]+[13*mm]*len(chunk))
+            table.setStyle(TableStyle([('GRID',(0,0),(-1,-1),1.3,colors.black), ('BOX',(0,0),(-1,-1),1.8,colors.black),
+                                      ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e8eef2')),
+                                      ('VALIGN',(0,0),(-1,-1),'MIDDLE'), ('LEFTPADDING',(0,0),(-1,-1),7)]))
+            story += [table, Spacer(1, 5*mm)]
+        story += [Paragraph('Shuttle-Angabe: gemessen / gerundeter Gruppenwert (bitte kennzeichnen).<br/>Sprungwerte: Protokoll-/Bestwert. Einzelversuche sind auf diesem Bogen nicht getrennt erfasst.<br/>Bedingungen / Notizen: __________________________________________________', style)]
+    doc.build(story)
+    return out.getvalue()
+
+
+def render_field_history(record):
+    events = record.get('feldtests', [])
+    if not events:
+        return
+    with st.expander('Feldtests aus Testtabelle / Dateiimport'):
+        rows = [{'Datum': e['datum'], 'Test': e['bogen'], **{label:e['werte'].get(k) for k,label in FIELD_METRICS.items()},
+                 'Shuttle-Test':shuttle_description(e.get('shuttle')) if 'shuttle' in e['werte'] else '',
+                 'Shuttle-Angabe':e['shuttle_angabe'], 'Notiz':e['notiz']} for e in events]
+        st.dataframe(field_display_frame(rows), hide_index=True, width='stretch')
+        st.caption('Shuttle bleibt von geraden Laufstrecken getrennt. Sprung-Protokollwerte erscheinen auch im Sprungtest-Verlauf. Fehlende Einzelversuche werden nicht erfunden.')
+        if any(e.get('aenderungen') for e in events):
+            with st.expander('Frühere Werte nach Korrekturen'):
+                for e in events:
+                    for old in e.get('aenderungen', []):
+                        st.write({'Datum':old['datum'], 'Test':old['bogen'], 'Werte':old['werte'], 'Notiz':old['notiz']})
+
+
+def render_field_reference():
+    with st.expander('PDF / Foto daneben ansehen (ohne automatische Erkennung)'):
+        upload = st.file_uploader('Bogen oder Screenshot als Vorlage', type=['pdf','jpg','jpeg','png'], key='field_reference')
+        st.caption('Diese Datei wird nur zur Ansicht geladen. Werte bitte in die Tabelle übertragen; digital ausgefüllte CSV-/Excel-Tabellen lassen sich direkt importieren.')
+        if upload is None:
+            return
+        if upload.size > 10_000_000:
+            st.error('Vorlage höchstens 10 MB. Größere Scans bitte aufteilen.')
+            return
+        data = upload.getvalue()
+        try:
+            if upload.name.lower().endswith('.pdf'):
+                import pypdfium2 as pdfium
+                document = pdfium.PdfDocument(data)
+                try:
+                    if not 1 <= len(document) <= 20:
+                        raise ValueError('Bitte einen Scan mit 1 bis 20 Seiten hochladen.')
+                    page_index = st.number_input('Seite der Vorlage', 1, len(document), 1, key='field_ref_page')-1
+                    page = document[page_index]
+                    try:
+                        scale = min(2., 1600/max(page.get_width(), page.get_height()))
+                        bitmap = page.render(scale=scale)
+                        try:
+                            picture = bitmap.to_pil()
+                            st.image(picture, width='stretch')
+                        finally:
+                            bitmap.close()
+                    finally:
+                        page.close()
+                finally:
+                    document.close()
+            else:
+                st.image(data, width='stretch')
+        except ImportError:
+            st.error('Für die PDF-Ansicht bitte auch die neue requirements.txt übernehmen.')
+        except Exception:
+            st.error('Diese Vorlage konnte nicht angezeigt werden. Bitte PDF, JPG oder PNG prüfen.')
+
+
+def render_individual_shuttle(record, sport, name, profile_for_save, guest):
+    if name not in st.session_state.kader_db.get(sport, {}):
+        return
+    with st.expander('Shuttle-Test: einfach, zweifach, dreifach'):
+        if guest:
+            st.caption('Neue Testergebnisse können Trainer erfassen.')
+            return
+        key = 'single_shuttle_' + hashlib.sha256((sport+name).encode()).hexdigest()[:12]
+        config = shuttle_inputs(key)
+        d = st.date_input('Datum des Shuttle-Tests', key=key+'_date')
+        title = st.text_input('Shuttle-Testbezeichnung', value='Shuttle-Test', key=key+'_title')
+        seconds = st.text_input('Shuttle-Zeit (s)', key=key+'_seconds')
+        mode = st.selectbox('Shuttle-Zeitangabe', FIELD_SHUTTLE_MODES, key=key+'_mode')
+        note = st.text_input('Shuttle-Notiz', key=key+'_note')
+        correct = st.checkbox('Gespeicherten Shuttle-Test dieses Datums korrigieren', key=key+'_correct')
+        st.caption('Speichert auch die aktuell bearbeiteten Profilwerte. Bei einem anderen Test am selben Datum eine andere Testbezeichnung verwenden.')
+        if st.button('Shuttle-Test speichern', key=key+'_save'):
+            try:
+                if field_number(seconds, FIELD_METRICS['shuttle']) is None:
+                    raise ValueError('Bitte eine Shuttle-Zeit eingeben.')
+                current = deepcopy(st.session_state.kader_db)
+                current[sport][name] = profile_for_save()
+                identity = f'{name} [{sport}]'
+                row = field_empty_row(name, identity)
+                row.update({FIELD_METRICS['shuttle']:seconds, 'Shuttle-Angabe':mode,'Notiz':note})
+                candidate, _, changed, _ = prepare_field_batch(current,[row],d.isoformat(),title,correct=correct,shuttle=config)
+                if not changed and candidate == st.session_state.kader_db:
+                    st.info('Dieser Test ist bereits gespeichert.')
+                else:
+                    revision = speichere_kader_in_datei(candidate,st.session_state.kader_revision)
+                    st.session_state.kader_db = candidate
+                    st.session_state.kader_revision = revision
+                    st.session_state.edit_epoch = st.session_state.get('edit_epoch',0)+1
+                    st.session_state.save_notice = f'Shuttle-Test und Profilwerte für {name} gespeichert.'
+                    st.rerun()
+            except (ValueError, OSError, sqlite3.Error, StorageError, StorageConflict) as exc:
+                st.error(f'Nicht gespeichert: {exc}')
+
+
+def render_test_table():
+    st.title('Testtabelle und Dateiimport')
+    st.button('Zur Trainingsplanung', on_click=navigiere, args=('Operativ',))
+    st.caption('Am Tablet direkt eintragen oder eine ausgefüllte CSV-/Excel-Tabelle laden. Ein Testdatum je Tabelle; bis zu 1000 Personen. Pro Sprungdisziplin ein Protokoll-/Bestwert.')
+    identities = field_identity_map(st.session_state.kader_db)
+    if not identities:
+        st.info('Zuerst die Personen im Kader anlegen. Danach können ihre Testwerte gemeinsam erfasst werden.')
+    draft = st.session_state.get('field_draft')
+    with st.expander('Neue Tabelle / Datei laden', expanded=draft is None):
+        names = st.multiselect('Personen aus dem Kader', list(identities), default=list(identities), key='field_roster_select')
+        allow_replace = st.checkbox('Vorhandenen Tabellenentwurf ersetzen', key='field_replace') if draft is not None else True
+        if len(names) > FIELD_MAX_ROWS:
+            st.info('Bitte höchstens 1000 Personen je Testtabelle auswählen.')
+        if st.button('Leere Testtabelle öffnen', disabled=not names or len(names)>FIELD_MAX_ROWS or not allow_replace):
+            st.session_state.field_draft = [field_empty_row(identities[n][1], n) for n in names]
+            st.session_state.field_epoch = st.session_state.get('field_epoch',0)+1
+            st.session_state.pop('field_preview', None)
+            st.rerun()
+        upload = st.file_uploader('Ausgefüllte Tabelle (CSV oder Excel)', type=['csv','xlsx'], key='field_import_file')
+        st.caption('Spaltennamen aus der Vorlage beibehalten. Excel: ein sichtbares Tabellenblatt, keine Formeln in Messwerten. Namen werden nur bei eindeutiger Übereinstimmung zugeordnet.')
+        if st.button('Datei in die Kontrolltabelle laden', disabled=upload is None or not allow_replace):
+            try:
+                rows, datum, title, shuttle = read_field_file(upload.getvalue(), upload.name, identities)
+                st.session_state.field_draft = rows
+                st.session_state.field_epoch = st.session_state.get('field_epoch',0)+1
+                st.session_state.field_pending_metadata = (datum, title, shuttle)
+                st.session_state.pop('field_preview', None)
+                st.rerun()
+            except ImportError:
+                st.error('Für Excel bitte die neue requirements.txt übernehmen. CSV funktioniert ohne die zusätzliche Excel-Bibliothek.')
+            except Exception as exc:
+                st.error(f'Datei nicht geladen: {exc}')
+    pending = st.session_state.pop('field_pending_metadata', None)
+    if pending:
+        st.session_state['field_date'] = date.fromisoformat(pending[0]) if pending[0] else date.today()
+        st.session_state['field_title'] = pending[1] or 'Leistungsanalyse'
+        st.session_state['field_shuttle_form'] = (pending[2] or {}).get('form','Bitte wählen')
+        st.session_state['field_shuttle_way'] = str((pending[2] or {}).get('weg_m',''))
+        if not pending[0]:
+            st.warning('Die Datei enthält kein Testdatum. Bitte das Datum unten einstellen.')
+    retained = st.session_state.get('field_metadata', {})
+    for k, v in retained.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+    left, right = st.columns([1,2])
+    datum = left.date_input('Gemeinsames Testdatum', key='field_date')
+    title = right.text_input('Testbezeichnung', value='Leistungsanalyse', max_chars=120, key='field_title')
+    shuttle = shuttle_inputs('field_shuttle')
+    default_mode = st.selectbox('Shuttle-Angabe für Zeilen ohne eigene Angabe', FIELD_SHUTTLE_MODES, key='field_default_mode')
+    st.session_state.field_metadata = {k:st.session_state[k] for k in ('field_date','field_title','field_shuttle_form','field_shuttle_way','field_default_mode')}
+    template_rows = [field_empty_row(identities[n][1], n) for n in names] or [field_empty_row('Name eintragen')]
+    c1, c2 = st.columns(2)
+    c1.download_button('CSV-Vorlage herunterladen', field_csv(template_rows, datum.isoformat(), title, identities, shuttle, default_mode),
+                       file_name='Doc_Athletic_Testvorlage.csv', mime='text/csv')
+    paper_key = json.dumps([names,datum.isoformat(),title,shuttle],ensure_ascii=False)
+    if c2.button('Papierbogen vorbereiten (PDF)'):
+        try:
+            content = field_sheet_pdf([identities[n][1] for n in names], datum.strftime('%d.%m.%Y'), title, shuttle)
+            st.session_state.field_paper = content
+            st.session_state.field_paper_key = paper_key
+        except ImportError:
+            st.error('Für den Papierbogen bitte die neue requirements.txt übernehmen.')
+    if 'field_paper' in st.session_state and st.session_state.get('field_paper_key')==paper_key:
+        st.download_button('Papierbogen herunterladen', st.session_state.field_paper, file_name='Doc_Athletic_Testbogen.pdf', mime='application/pdf')
+    draft = st.session_state.get('field_draft')
+    if draft is None:
+        return
+    if any(not r.get('Zuordnung') for r in draft):
+        st.info('Nicht eindeutig erkannte Namen: bitte in der Spalte ‚Zuordnung‘ die richtige Person auswählen. Es werden keine neuen Profile automatisch angelegt.')
+    st.markdown('**Werte eintragen und kontrollieren**')
+    st.caption('Komma oder Punkt möglich. Leeres Feld = kein Ergebnis. 0 wird nicht als Messergebnis übernommen. Für gerundete Shuttlezeiten ‚Gerundeter Gruppenwert‘ wählen; es wird nicht automatisch gerundet.')
+    block = st.radio('Angezeigte Testspalten', ['Laufzeiten','Sprungweiten','Alle Werte'], horizontal=True, key='field_view')
+    st.caption('Der Wechsel zwischen Laufzeiten und Sprungweiten erhält die Eingaben. Für mehr Platz das Vollbildsymbol rechts oben in der Tabelle verwenden.')
+    if st.checkbox('Scan / Foto neben der Tabelle anzeigen', key='field_show_reference'):
+        table_column, reference_column = st.columns([3,2])
+        with reference_column:
+            render_field_reference()
+    else:
+        table_column = st.container()
+    epoch = st.session_state.get('field_epoch',0)
+    config = {label:st.column_config.TextColumn(label, width=160 if k in JUMP_TESTS else 125) for k,label in FIELD_METRICS.items()}
+    config.update({'Name auf Bogen':st.column_config.TextColumn('Name auf Bogen',width='medium'),
+                   'Zuordnung':st.column_config.SelectboxColumn('Zuordnung', options=list(identities),width='medium'),
+                   'Shuttle-Angabe':st.column_config.SelectboxColumn('Shuttle-Angabe',options=FIELD_SHUTTLE_MODES,width='medium'),
+                   'Notiz':st.column_config.TextColumn('Notiz',width='large')})
+    source_needed = any(r.get('Name auf Bogen') != identities.get(r.get('Zuordnung'),('', ''))[1] for r in draft)
+    order = (['Name auf Bogen'] if source_needed else []) + ['Zuordnung']
+    order += [FIELD_METRICS[k] for k in (['sprint60','shuttle'] if block=='Laufzeiten' else list(JUMP_TESTS) if block=='Sprungweiten' else list(FIELD_METRICS))]
+    if block != 'Sprungweiten':
+        order += ['Shuttle-Angabe','Notiz']
+    with table_column:
+        edited = st.data_editor(pd.DataFrame(draft, columns=FIELD_COLUMNS).astype(str), hide_index=True, width='stretch',
+                                height=440, row_height=44, column_config=config, column_order=order, disabled=['Name auf Bogen'],
+                                key=f'field_grid_{epoch}', num_rows='fixed', on_change=field_sync_grid, args=(f'field_grid_{epoch}',))
+    rows = edited.to_dict('records')
+    # Separate non-widget state survives navigation without binding edits to another athlete.
+    st.session_state.field_current_rows = rows
+    st.download_button('Aktuellen Tabellenentwurf sichern (CSV)', field_csv(rows, datum.isoformat(), title, identities, shuttle, default_mode),
+                       file_name='Doc_Athletic_Testerfassung.csv', mime='text/csv')
+    correct = st.checkbox('Abweichende, bereits gespeicherte Werte korrigieren (alter Stand bleibt im Verlauf)', key='field_correct')
+    use_reference = st.checkbox('60-m-Werte auch als aktuelle Referenz für die Trainingsplanung übernehmen', key='field_use_reference')
+    state = {'rows':rows,'datum':datum.isoformat(),'bogen':title,'correct':correct,'use_reference':use_reference,'shuttle':shuttle,'default_mode':default_mode}
+    fingerprint = hashlib.sha256(json.dumps(state, ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+    if st.button('Eingaben prüfen', type='primary'):
+        try:
+            candidate, preview, changed, skipped = prepare_field_batch(st.session_state.kader_db, **state)
+            st.session_state.field_preview = {'fingerprint':fingerprint,'revision':st.session_state.kader_revision,
+                                              'preview':preview,'changed':changed,'skipped':skipped}
+        except ValueError as exc:
+            st.session_state.pop('field_preview', None)
+            st.error(str(exc))
+    checked = st.session_state.get('field_preview')
+    if checked and checked['fingerprint'] == fingerprint:
+        st.subheader('Kontrolle vor dem Speichern')
+        summary = field_display_frame(checked['preview'])
+        visible = [k for k in summary if k not in FIELD_METRICS.values() or any(summary[k] != '')]
+        st.dataframe(summary[visible], hide_index=True, width='stretch')
+        st.caption(f"{checked['changed']} Personen mit Änderungen; {checked['skipped']} leere Zeilen ausgelassen. Datum: {datum.strftime('%d.%m.%Y')}. Test: {title}.")
+        if st.button('Geprüfte Testwerte gemeinsam speichern', disabled=not checked['changed'], type='primary'):
+            try:
+                if checked['revision'] != st.session_state.kader_revision:
+                    raise StorageConflict('Der Kader hat sich seit der Prüfung geändert. Bitte erneut prüfen.')
+                candidate, preview, changed, skipped = prepare_field_batch(st.session_state.kader_db, **state)
+                rev = speichere_kader_in_datei(candidate, checked['revision'])
+                st.session_state.kader_db = candidate
+                st.session_state.kader_revision = rev
+                st.session_state.edit_epoch = st.session_state.get('edit_epoch',0)+1
+                st.session_state.save_notice = f'Testwerte für {changed} Personen gemeinsam gespeichert. Profile und Trainingspläne bleiben erhalten.'
+                st.session_state.field_draft = rows
+                st.session_state.field_epoch = epoch+1
+                st.session_state.pop('field_preview',None)
+                st.rerun()
+            except (OSError, sqlite3.Error, StorageError, StorageConflict, ValueError) as exc:
+                st.error(f'Nichts gespeichert: {exc}. Den Tabellenentwurf als CSV sichern; bei einem Sitzungskonflikt den Kader neu laden und erneut prüfen.')
+    elif checked:
+        st.info('Eingaben wurden geändert. Bitte erneut prüfen.')
+
 
 SOURCE_UNITS = {}  # Private Originalpläne werden bei Bedarf vom Trainer geladen.
 
@@ -1546,6 +2188,7 @@ def validate_kader(kader):
             validate_load_reference(p.get("lastreferenz", {}))
             phase_validate(p.get("phasensteuerung", {}))
             validate_jump_tests(p.get("sprungtests", []))
+            validate_field_tests(p.get("feldtests", []))
             validate_sessions(p.get("einheitenprotokoll", {}))
             rate = p.get("folge_rate", 0)
             if type(rate) not in (int, float) or not math.isfinite(rate) or not 0 <= rate <= 20:
@@ -1903,6 +2546,9 @@ if "save_notice" in st.session_state:
     st.success(st.session_state.pop("save_notice"))
 
 def navigiere(ziel):
+    if st.session_state.get("navigations_status") == "Testtabelle" and "field_current_rows" in st.session_state:
+        st.session_state.field_draft = deepcopy(st.session_state.field_current_rows)
+        st.session_state.field_epoch = st.session_state.get("field_epoch",0)+1
     st.session_state.navigations_status = ziel
 
 if st.session_state.get('auth_modus') == 'trainer':
@@ -1989,6 +2635,9 @@ def snap_to_hardware(wert, hardware_liste, konservativ=True):
         return max(passende) if konservativ else min(passende)
     return None
 
+if st.session_state.auth_modus == "trainer":
+    st.sidebar.button("TESTTABELLE / DATEIIMPORT", on_click=navigiere, args=("Testtabelle",))
+
 if st.sidebar.button("ABMELDEN"):
     st.session_state.clear()
     st.rerun()
@@ -2020,6 +2669,12 @@ elif st.session_state.navigations_status == 'Uebersicht':
         st.button("<< ZURÜCK", on_click=navigiere, args=('Start',))
     with col2:
         st.button("OPERATIVES MENÜ STARTEN >>", on_click=navigiere, args=('Operativ',))
+
+elif st.session_state.navigations_status == 'Testtabelle':
+    if st.session_state.auth_modus != "trainer":
+        st.error("Die Testtabelle ist nur für Trainer verfügbar.")
+    else:
+        render_test_table()
 
 elif st.session_state.navigations_status == 'Operativ':
     col_top1, col_top2 = st.columns([1, 4])
@@ -2157,6 +2812,7 @@ elif st.session_state.navigations_status == 'Operativ':
                         archive[active_cycle] = saved
                         # Tests gehören zum Athleten, nicht zum Zyklus.
                         restored["sprungtests"] = deepcopy(rec.get("sprungtests", []))
+                        restored["feldtests"] = deepcopy(rec.get("feldtests", []))
                         restored["einheitenprotokoll"] = deepcopy(rec.get("einheitenprotokoll", {}))
                         rec = restored
                         rec["aktiver_makrozyklus"] = chosen_cycle
@@ -2284,6 +2940,7 @@ elif st.session_state.navigations_status == 'Operativ':
             settings_by_focus = {}
             record.pop("fussball_schwerpunkte", None)
             record.pop("sprungtests", None)
+            record.pop("feldtests", None)
             record.pop("makrozyklen", None)
             record.pop("aktiver_makrozyklus", None)
             record.pop("einheitenprotokoll", None)
@@ -2335,6 +2992,9 @@ elif st.session_state.navigations_status == 'Operativ':
                 athlete_actions.error(f"Nicht gespeichert: {exc}")
 
     with jump_area:
+        render_field_history(aktuelle_daten)
+        if modus == "Einzelathlet / Einzelathletin":
+            render_individual_shuttle(aktuelle_daten, aktive_kategorie, ziel, profile_for_save, guest)
         if modus == "Einzelathlet / Einzelathletin":
             with st.expander("Sprungtests: Fünfer-Hop, Schlusssprung und Seitensymmetrie", expanded=False):
                 st.caption("Fünfer-Hop: fünf einbeinige Sprünge fortlaufend je Seite. Fünfer-Schlusssprung: fünf beidbeinige Sprünge ohne Haltepunkt. Gemessen wird jeweils die Gesamtweite in Metern; der beste von drei Versuchen zählt.")
@@ -2349,8 +3009,9 @@ elif st.session_state.navigations_status == 'Operativ':
                     rows = []
                     for test in history:
                         row = jump_summary(test)
+                        row["Erfassung"] = "Protokollwert; Einzelversuche nicht angegeben" if "protokollwerte" in test else "Einzelversuche"
                         for field, label in JUMP_TESTS.items():
-                            for i, value in enumerate(test[field], 1):
+                            for i, value in enumerate(test.get(field, [None, None, None]), 1):
                                 row[f"{label}: Versuch {i} (m)"] = value or None
                         rows.append(row)
                     st.download_button("Sprungtest-Verlauf herunterladen (CSV)",

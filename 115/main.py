@@ -2,7 +2,7 @@
 # DOC ATHLETIC TRAIN SMART EVOLUTION SOFTWARE - FUSSBALL (Version 115)
 # ChatGPT überarbeitet auf Grundlage 23.8.5; Modul 1
 # Überarbeitet: Soll/Ist, 25 Quellenpläne, Folgeempfehlungen, Makrozyklen, Sprungtest-Verlauf
-# Stand: 22.09.2026 – Fußball-Schwerpunkte, gemeinsamer Kader, Laufblöcke und Altersgrenzen
+# Stand: 23.09.2026 – Korrektur: Profilwerte zusammen mit Soll-/Ist-Plan und Sprungtest speichern
 # ============================================================================
 
 import streamlit as st
@@ -1044,7 +1044,7 @@ def protocol_rows(frame):
         rows.append(clean)
     return rows
 
-def unit_workflow(athlete, sport, target, te, default_plan, key_for, guest, default_timing=None, focus="komplex"):
+def unit_workflow(athlete, sport, target, te, default_plan, key_for, guest, default_timing=None, focus="komplex", profile_for_save=None):
     cycle=athlete.get("aktiver_makrozyklus", "Bestand")
     unit_key=focus_unit_key(athlete,cycle,te,focus)
     saved=athlete.get("einheitenprotokoll",{}).get(unit_key)
@@ -1079,6 +1079,7 @@ def unit_workflow(athlete, sport, target, te, default_plan, key_for, guest, defa
     else:
         st.info("Noch keine vorherige Ist-Einheit mit geeigneten Zahlenwerten vorhanden.")
     timing_plan = timing_plan_ui(default_timing or {}, saved.get("timing") if saved else None, prefix+"timing_", guest)
+    st.caption("Soll- und Ist-Speichern sichern auch die aktuell eingetragenen Profilwerte und Schwerpunktvorgaben dieser Person.")
     save_plan=st.button("Sollplan dieser Einheit speichern",key=prefix+"saveplan",disabled=guest)
     if saved:
         with st.expander("Ursprünglicher Sollplan und Korrekturverlauf"):
@@ -1112,14 +1113,15 @@ def unit_workflow(athlete, sport, target, te, default_plan, key_for, guest, defa
             if save_actual and not rows and not recorded_duration(timing_actual):
                 raise ValueError("Mindestens eine absolvierte Übung eintragen.")
             updated=deepcopy(st.session_state.kader_db)
-            rec=save_unit_record(updated[sport][target],cycle,te,saved["plan"] if save_actual else plan,saved["source"] if save_actual else source,
+            profile = profile_for_save() if profile_for_save is not None else updated[sport][target]
+            rec=save_unit_record(profile,cycle,te,saved["plan"] if save_actual else plan,saved["source"] if save_actual else source,
                                 actual=rows,notes=notes if save_actual else None,performed=performed.isoformat() if save_actual else None, timing=timing_actual if save_actual else timing_plan,focus=focus)
             rec["folge_rate"]=pct
             updated[sport][target]=rec
             revision=speichere_kader_in_datei(updated,st.session_state.kader_revision)
             st.session_state.kader_db=updated;st.session_state.kader_revision=revision
             st.session_state.edit_epoch=st.session_state.get("edit_epoch",0)+1
-            st.session_state.save_notice="Sollplan gespeichert." if save_plan else "Ist-Durchführung gespeichert; Folgeempfehlungen stehen bei der nächsten Einheit bereit."
+            st.session_state.save_notice="Sollplan und aktuelle Profilwerte gespeichert." if save_plan else "Ist-Durchführung und aktuelle Profilwerte gespeichert; Folgeempfehlungen stehen bei der nächsten Einheit bereit."
             st.rerun()
         except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:
             st.error(f"Einheit nicht gespeichert: {exc}")
@@ -2270,6 +2272,41 @@ elif st.session_state.navigations_status == 'Operativ':
             and not math.isclose(tempo_references[str(test_distance)],test_seconds)):
         st.warning("Für dieselbe Strecke sind zwei Testzeiten eingetragen. Die Tempotabelle verwendet die Streckenreferenz aus ‚Testzeiten bis 800 m‘; der Einzeltest-Rechner verwendet seine eigene Eingabe. Bitte die Werte abgleichen.")
 
+    neuer_name = ""
+
+    def profile_for_save(create_new=False):
+        if neuer_name and not create_new:
+            raise ValueError("Bitte zuerst das neue Athletenprofil oben anlegen und speichern. Plan und Tests können danach dieser Person zugeordnet werden.")
+        save_sport = "Fussball" if create_new else aktive_kategorie
+        record = deepcopy(aktuelle_daten)
+        settings_by_focus = {key: focus_settings(aktuelle_daten, key) for key in FOCUS_LABELS}
+        if create_new:
+            settings_by_focus = {}
+            record.pop("fussball_schwerpunkte", None)
+            record.pop("sprungtests", None)
+            record.pop("makrozyklen", None)
+            record.pop("aktiver_makrozyklus", None)
+            record.pop("einheitenprotokoll", None)
+        record.update({"alter": int(alter), "groesse": float(groesse), "gewicht": float(gewicht), "profil": storage_profile(profil_soll, save_sport),
+            "phasensteuerung":({**phase_config,"references":{},"jumps_ready":False,"spruenge_ready":False} if create_new and ziel in aktive_athleten_db else phase_config), "lastreferenz":({} if create_new and ziel in aktive_athleten_db else load_reference), "geschlecht": geschlecht_wahl, "fasertyp": ft, "reife": reife, "sbe": sbe_ziel, "notizen": profile_notes,
+            "m_training": (m_training_defaults(save_sport, band) if create_new or save_sport != "Fussball" else m_config),
+            "t_60": float(t_60), "t_150": float(t_150), "t_150_quelle": quelle_150, "planung":plan_settings, "tempo_referenzen":tempo_references})
+        settings_by_focus[focus] = {"planung": deepcopy(plan_settings),
+            "m_training": m_training_defaults("Fussball", band) if create_new and ziel in aktive_athleten_db else deepcopy(m_config),
+            "speed_jump": deepcopy(speed_config), "hurdles": deepcopy(hurdle_config), "hurdles_band": band}
+        # An age-group change resets only age-specific M-sprint settings.
+        for settings in settings_by_focus.values():
+            if settings.get("hurdles_band", band) != band:
+                settings["hurdles"] = {}
+                settings["hurdles_band"] = band
+            if settings.get("speed_jump"):
+                settings["speed_jump"] = normalize_speed_jump(settings["speed_jump"], band, geschlecht_wahl)
+            if settings.get("m_training", {}).get("band", band) != band:
+                settings["m_training"] = m_training_defaults("Fussball", band)
+        record["fussball_schwerpunkte"] = settings_by_focus
+        record["trainingsschwerpunkt"] = focus
+        return record
+
     if modus == "Einzelathlet / Einzelathletin" and st.session_state.auth_modus == "trainer":
         with athlete_actions:
             st.subheader("Athletin / Athlet anlegen und speichern")
@@ -2284,34 +2321,8 @@ elif st.session_state.navigations_status == 'Operativ':
                 if neuer_name and any(neuer_name in athletes for athletes in st.session_state.kader_db.values()):
                     raise ValueError("Dieser Name ist bereits vorhanden. Bitte das vorhandene Profil auswählen.")
                 updated = deepcopy(st.session_state.kader_db)
-                record = deepcopy(aktuelle_daten)
-                settings_by_focus = {key: focus_settings(aktuelle_daten, key) for key in FOCUS_LABELS}
                 save_sport = "Fussball" if neuer_name else aktive_kategorie
-                if neuer_name:
-                    settings_by_focus = {}
-                    record.pop("fussball_schwerpunkte", None)
-                    record.pop("sprungtests", None)
-                    record.pop("makrozyklen", None)
-                    record.pop("aktiver_makrozyklus", None)
-                    record.pop("einheitenprotokoll", None)
-                record.update({"alter": int(alter), "groesse": float(groesse), "gewicht": float(gewicht), "profil": storage_profile(profil_soll, save_sport),
-                    "phasensteuerung":({**phase_config,"references":{},"jumps_ready":False,"spruenge_ready":False} if neuer_name and ziel in aktive_athleten_db else phase_config), "lastreferenz":({} if neuer_name and ziel in aktive_athleten_db else load_reference), "geschlecht": geschlecht_wahl, "fasertyp": ft, "reife": reife, "sbe": sbe_ziel, "notizen": profile_notes,
-                    "m_training": (m_training_defaults(save_sport, band) if neuer_name or save_sport != "Fussball" else m_config),
-                    "t_60": float(t_60), "t_150": float(t_150), "t_150_quelle": quelle_150, "planung":plan_settings, "tempo_referenzen":tempo_references})
-                settings_by_focus[focus] = {"planung": deepcopy(plan_settings),
-                    "m_training": m_training_defaults("Fussball", band) if neuer_name and ziel in aktive_athleten_db else deepcopy(m_config),
-                    "speed_jump": deepcopy(speed_config), "hurdles": deepcopy(hurdle_config), "hurdles_band": band}
-                # An age-group change resets only age-specific M-sprint settings.
-                for settings in settings_by_focus.values():
-                    if settings.get("hurdles_band", band) != band:
-                        settings["hurdles"] = {}
-                        settings["hurdles_band"] = band
-                    if settings.get("speed_jump"):
-                        settings["speed_jump"] = normalize_speed_jump(settings["speed_jump"], band, geschlecht_wahl)
-                    if settings.get("m_training", {}).get("band", band) != band:
-                        settings["m_training"] = m_training_defaults("Fussball", band)
-                record["fussball_schwerpunkte"] = settings_by_focus
-                record["trainingsschwerpunkt"] = focus
+                record = profile_for_save(create_new=bool(neuer_name))
                 updated[save_sport][ziel_name] = record
                 revision = speichere_kader_in_datei(updated, st.session_state.kader_revision)
                 st.session_state.kader_db = updated
@@ -2351,7 +2362,7 @@ elif st.session_state.navigations_status == 'Operativ':
                     st.info("Zuerst oben die Athletin oder den Athleten anlegen und speichern. Danach hier die Tests eintragen.")
                 elif not guest:
                     st.write(f"Neuer Test für: {ziel}")
-                    st.caption("Dieser Knopf speichert nur den Test. Änderungen an den übrigen Profilwerten bitte zusätzlich oben speichern. Frühere Tests bleiben erhalten.")
+                    st.caption("Dieser Knopf speichert den neuen Test zusammen mit den aktuellen Profilwerten und Schwerpunktvorgaben. Frühere Tests bleiben erhalten.")
                     jump_epoch_key = key_for("sprung_epoch")
                     jump_epoch = st.session_state.get(jump_epoch_key, 0)
                     jump_key = lambda field: key_for(f"{field}_{jump_epoch}")
@@ -2372,12 +2383,13 @@ elif st.session_state.navigations_status == 'Operativ':
                         try:
                             validate_jump_tests([new_test])
                             updated = deepcopy(st.session_state.kader_db)
+                            updated[aktive_kategorie][ziel] = profile_for_save()
                             updated[aktive_kategorie][ziel].setdefault("sprungtests", []).append(new_test)
                             revision = speichere_kader_in_datei(updated, st.session_state.kader_revision)
                             st.session_state.kader_db = updated
                             st.session_state.kader_revision = revision
                             st.session_state[jump_epoch_key] = jump_epoch + 1
-                            st.session_state.save_notice = f"Sprungtest für {ziel} gespeichert."
+                            st.session_state.save_notice = f"Sprungtest und aktuelle Profilwerte für {ziel} gespeichert."
                             st.rerun()
                         except (OSError, sqlite3.Error, StorageError, ValueError, StorageConflict) as exc:
                             st.error(f"Test nicht gespeichert: {exc}")
@@ -2828,7 +2840,7 @@ elif st.session_state.navigations_status == 'Operativ':
 
     if modus == "Einzelathlet / Einzelathletin" and ziel in aktive_athleten_db:
         protocol_te = st.selectbox("Einheit für Soll-/Ist-Protokoll", list(te_liste), key=key_for("protocol_te"))
-        unit_workflow(aktuelle_daten, aktive_kategorie, ziel, protocol_te, plan_as_text(rendered_plans[protocol_te]), key_for, guest, weekly_timing("Fussball", band, einheiten, "TE2" if unit_context(protocol_te, einheiten, startwoche, role)[2] else "TE1"), focus=focus)
+        unit_workflow(aktuelle_daten, aktive_kategorie, ziel, protocol_te, plan_as_text(rendered_plans[protocol_te]), key_for, guest, weekly_timing("Fussball", band, einheiten, "TE2" if unit_context(protocol_te, einheiten, startwoche, role)[2] else "TE1"), focus=focus, profile_for_save=profile_for_save)
     st.markdown(html_matrices, unsafe_allow_html=True)
     st.markdown("---")
 
@@ -2847,4 +2859,3 @@ elif st.session_state.navigations_status == 'Operativ':
 <p style="color: #ffffff !important; font-size: 13px; letter-spacing: 1px; margin-top: 5px;">DOC ATHLETIC TRAIN SMART EVOLUTION SOFTWARE 115</p>
 </div>""", unsafe_allow_html=True)
         lade_bild(["Foto.jpg", "Foto.JPG", "foto.jpg", "foto.JPG", "Foto.jpeg", "foto.jpeg", "Foto.png", "foto.png"], use_col=True)
-

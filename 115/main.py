@@ -2,7 +2,7 @@
 # DOC ATHLETIC TRAIN SMART EVOLUTION SOFTWARE - FUSSBALL (Version 115)
 # ChatGPT überarbeitet auf Grundlage 23.8.5; Modul 1
 # Überarbeitet: Soll/Ist, 25 Quellenpläne, Folgeempfehlungen, Makrozyklen, Sprungtest-Verlauf
-# Stand: 23.09.2026 – Testtabelle, CSV-/Excel-Import und Speicherkorrektur
+# Stand: 23.09.2026 – Stammdatenimport XLSX/ODS/CSV, variable Strecken und Wendezuschlag
 # ============================================================================
 
 import streamlit as st
@@ -23,6 +23,7 @@ import csv
 import io
 import re
 import unicodedata
+import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
 st.set_page_config(page_title="Doc Athletic – Fußball · 115", layout="wide", initial_sidebar_state="expanded")
@@ -207,7 +208,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = "23.09.2026 · Testtabelle und Dateiimport · Speicherkorrektur enthalten"
+BUILD_STAND = "23.09.2026 · Kader- und Tabellenimport · Stand 115.3"
 
 
 # Version 115: agreed working values; saved plans remain immutable until edited.
@@ -763,41 +764,45 @@ def validate_jump_tests(tests):
 
 # Test capture is separate from profile editing. Empty measurements stay absent.
 FIELD_METRICS = {
-    "sprint60": "60 m (s)", "shuttle": "Shuttlezeit (s)",
+    "sprint60": "60 m (s)", "shuttle": "Shuttlezeit (s)", "sprint": "Sprintzeit (s)",
     "hop_links": "5er-Hop links (m)", "hop_rechts": "5er-Hop rechts (m)",
     "schluss": "5er-Schlusssprung (m)",
 }
 FIELD_SHUTTLE_MODES = ["Gemessen", "Gerundeter Gruppenwert", "Nicht angegeben"]
-FIELD_COLUMNS = ["Name auf Bogen", "Zuordnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz"]
+FIELD_COLUMNS = ["Name auf Bogen", "Zuordnung", "Sprintstrecke (m)", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz"]
 FIELD_MAX_ROWS = 1000
 SHUTTLE_FORMS = {"Einfach": 1, "Zweifach": 2, "Dreifach": 3}
 
 
-def shuttle_definition(form, distance):
+def shuttle_definition(form, distance, extra=0):
     if form not in SHUTTLE_FORMS:
         raise ValueError('Bitte Shuttle-Test einfach, zweifach oder dreifach auswählen.')
     way = field_number(distance, 'Strecke je Weg')
     if way is None:
         raise ValueError('Für Shuttle bitte die Strecke je Hin- oder Rückweg eintragen.')
-    return {'form': form, 'weg_m': way}
+    extra = roster_number(extra, 'Wendezuschlag gesamt (m)', 0, 1000) or 0
+    return {'form': form, 'weg_m': way, **({'wendezuschlag_m': extra} if extra else {})}
 
 
 def shuttle_description(config):
     if not config:
         return 'Shuttle-Anordnung noch offen'
     phases = 2 * SHUTTLE_FORMS[config['form']]
-    return f"{config['form']}: {phases} × {config['weg_m']:g} m = {phases * config['weg_m']:g} m gesamt; {phases} Beschleunigungsphasen"
+    extra = config.get('wendezuschlag_m', 0)
+    turn = f" + {extra:g} m Wendezuschlag" if extra else ""
+    return f"{config['form']}: {phases} × {config['weg_m']:g} m{turn} = {phases * config['weg_m'] + extra:g} m gesamt; {phases} Beschleunigungsphasen"
 
 
 def shuttle_inputs(prefix, saved=None):
     saved = saved or {}
-    a, b = st.columns(2)
+    a, b, c = st.columns(3)
     options = ['Bitte wählen'] + list(SHUTTLE_FORMS)
     form = a.selectbox('Shuttle-Test', options, index=options.index(saved.get('form', 'Bitte wählen')), key=prefix+'_form')
     way = b.text_input('Strecke je Hin- oder Rückweg (m)', value=str(saved.get('weg_m','')), key=prefix+'_way')
+    extra = c.text_input('Wendezuschlag gesamt (m; leer = 0)', value=str(saved.get('wendezuschlag_m', '')), key=prefix+'_extra')
     st.caption('Einfach = hin und zurück (2 Wege); zweifach = 4 Wege; dreifach = 6 Wege. Die eingegebene Strecke gilt für einen Weg.')
     try:
-        result = shuttle_definition(form, way)
+        result = shuttle_definition(form, way, extra)
         st.info(shuttle_description(result))
         return result
     except ValueError as exc:
@@ -819,7 +824,7 @@ def field_number(value, label):
     if type(value) is bool or not re.fullmatch(r"\d+(?:[.,]\d{1,4})?", raw):
         raise ValueError(f"{label}: Bitte eine Zahl mit Komma oder Punkt eingeben; fehlende Werte leer lassen.")
     number = float(raw.replace(",", "."))
-    upper = 10000 if label == 'Strecke je Weg' else 1800 if label in (FIELD_METRICS['sprint60'], FIELD_METRICS['shuttle']) else 100
+    upper = 10000 if label in ('Strecke je Weg', 'Sprintstrecke (m)') else 1800 if label in (FIELD_METRICS['sprint60'], FIELD_METRICS['shuttle'], FIELD_METRICS['sprint']) else 100
     if not math.isfinite(number) or not 0 < number <= upper:
         raise ValueError(f"{label}: Der Wert muss größer als 0 und höchstens {upper} sein. 0 bitte durch ein leeres Feld ersetzen.")
     return number
@@ -841,7 +846,7 @@ def field_match(name, sport, identities):
 
 
 def field_empty_row(name="", identity=""):
-    return {"Name auf Bogen": name, "Zuordnung": identity,
+    return {"Name auf Bogen": name, "Zuordnung": identity, "Sprintstrecke (m)": "",
             **{label: "" for label in FIELD_METRICS.values()},
             "Shuttle-Angabe": "Nicht angegeben", "Notiz": ""}
 
@@ -884,14 +889,14 @@ def field_date(value):
 
 def field_csv(rows, datum, bogen, identities, shuttle=None, default_mode='Nicht angegeben'):
     stream = io.StringIO(newline="")
-    labels = ["Name", "Kaderbereich", "Datum", "Testbezeichnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz", "Shuttleform", "Strecke je Weg (m)"]
+    labels = ["Name", "Kaderbereich", "Datum", "Testbezeichnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz", "Shuttleform", "Strecke je Weg (m)", "Wendezuschlag gesamt (m)", "Sprintstrecke (m)"]
     writer = csv.DictWriter(stream, labels, delimiter=";", lineterminator="\n")
     writer.writeheader()
     for row in rows:
         sport, name = identities.get(row.get("Zuordnung"), ("", row.get("Name auf Bogen", "")))
         record = {"Name": name, "Kaderbereich": sport, "Datum": datum, "Testbezeichnung": bogen,
                   **{k: field_text(row.get(k)) for k in labels[4:]},
-                  'Shuttleform': (shuttle or {}).get('form',''), 'Strecke je Weg (m)': (shuttle or {}).get('weg_m','')}
+                  'Shuttleform': (shuttle or {}).get('form',''), 'Strecke je Weg (m)': (shuttle or {}).get('weg_m',''), 'Wendezuschlag gesamt (m)': (shuttle or {}).get('wendezuschlag_m','')}
         if record.get('Shuttle-Angabe') in ('','Nicht angegeben'):
             record['Shuttle-Angabe'] = default_mode
         # Prevent spreadsheet formula evaluation when a note/name starts with = etc.
@@ -942,7 +947,7 @@ def read_field_file(data, filename, identities):
     # Ignore genuinely empty trailing columns, never populated unknown columns.
     while headers and not headers[-1] and all(len(r) < len(headers) or not field_text(r[len(headers)-1]) for r in table[1:]):
         headers.pop()
-    allowed = {"Name", "Kaderbereich", "Datum", "Testbezeichnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz", "Shuttleform", "Strecke je Weg (m)"}
+    allowed = {"Name", "Kaderbereich", "Datum", "Testbezeichnung", *FIELD_METRICS.values(), "Shuttle-Angabe", "Notiz", "Shuttleform", "Strecke je Weg (m)", "Wendezuschlag gesamt (m)", "Sprintstrecke (m)"}
     if len(set(headers)) != len(headers) or "Name" not in headers or set(headers) - allowed:
         raise ValueError("Spaltenüberschriften passen nicht. Bitte die CSV-Vorlage verwenden; sie lässt sich auch in Excel öffnen. Erlaubt: " + ", ".join(sorted(allowed)))
     if not set(FIELD_METRICS.values()) & set(headers):
@@ -966,19 +971,20 @@ def read_field_file(data, filename, identities):
             row[label] = field_text(record.get(label))
         row["Shuttle-Angabe"] = field_text(record.get("Shuttle-Angabe")) or "Nicht angegeben"
         row["Notiz"] = field_text(record.get("Notiz"))
+        row["Sprintstrecke (m)"] = field_text(record.get("Sprintstrecke (m)"))
         if field_text(record.get("Datum")):
             dates.add(field_date(record['Datum']))
         if field_text(record.get("Testbezeichnung")):
             titles.add(field_text(record['Testbezeichnung']))
-        if field_text(record.get('Shuttleform')) or field_text(record.get('Strecke je Weg (m)')):
-            config = shuttle_definition(field_text(record.get('Shuttleform')), record.get('Strecke je Weg (m)'))
-            shuttles.add((config['form'],config['weg_m']))
+        if field_text(record.get('Shuttleform')) or field_text(record.get('Strecke je Weg (m)'), record.get('Wendezuschlag gesamt (m)')):
+            config = shuttle_definition(field_text(record.get('Shuttleform')), record.get('Strecke je Weg (m)'), record.get('Wendezuschlag gesamt (m)'))
+            shuttles.add((config['form'],config['weg_m'],config.get('wendezuschlag_m',0)))
         rows.append(row)
     if len(dates) > 1 or len(titles) > 1 or len(shuttles) > 1:
         raise ValueError("Bitte pro Import ein Testdatum, eine Testbezeichnung und eine Shuttle-Anordnung verwenden.")
     if not rows:
         raise ValueError("Die Datei enthält keine Personen.")
-    shuttle = dict(zip(('form','weg_m'),next(iter(shuttles)))) if shuttles else None
+    shuttle = shuttle_definition(*next(iter(shuttles))) if shuttles else None
     return rows, next(iter(dates), None), next(iter(titles), None), shuttle
 
 
@@ -1001,9 +1007,11 @@ def validate_field_tests(tests):
         for k, v in values.items():
             if field_number(v, FIELD_METRICS[k]) is None:
                 raise ValueError("Fehlende Werte dürfen nicht als Messergebnis gespeichert werden.")
+        if 'sprint' in values and field_number(event.get('sprint_m'), 'Sprintstrecke (m)') is None:
+            raise ValueError('Sprintstrecke fehlt.')
         if 'shuttle' in values:
             config = event.get('shuttle')
-            if not isinstance(config, dict) or shuttle_definition(config.get('form'),config.get('weg_m')) != config:
+            if not isinstance(config, dict) or shuttle_definition(config.get('form'),config.get('weg_m'),config.get('wendezuschlag_m',0)) != config:
                 raise ValueError('Shuttle-Anordnung prüfen.')
         if event.get('shuttle_angabe') not in FIELD_SHUTTLE_MODES:
             raise ValueError("Herkunft der Shuttlezeit prüfen.")
@@ -1054,12 +1062,17 @@ def prepare_field_batch(kader, rows, datum, bogen, correct=False, use_reference=
             if 'shuttle' in values:
                 if not shuttle:
                     raise ValueError('Für die Shuttlezeit bitte Shuttle-Test und Strecke je Weg festlegen.')
-                shuttle = shuttle_definition(shuttle.get('form'),shuttle.get('weg_m'))
+                shuttle = shuttle_definition(shuttle.get('form'),shuttle.get('weg_m'),shuttle.get('wendezuschlag_m',0))
+            sprint_m = field_number(row.get('Sprintstrecke (m)'), 'Sprintstrecke (m)') if 'sprint' in values else None
+            if 'sprint' in values and sprint_m is None:
+                raise ValueError('Sprintstrecke fehlt.')
             rec = updated[sport][name]
             event_id = hashlib.sha256(json.dumps([datum, bogen.casefold()], ensure_ascii=False).encode()).hexdigest()
             events = rec.setdefault('feldtests', [])
             old = next((e for e in events if e['id'] == event_id), None)
             conflicting = [FIELD_METRICS[k] for k, v in values.items() if old and k in old['werte'] and old['werte'][k] != v]
+            if old and 'sprint' in old['werte'] and 'sprint' in values and old.get('sprint_m') != sprint_m:
+                raise ValueError('Andere Sprintstrecke: bitte eine eigene Testbezeichnung verwenden.')
             if old and 'shuttle' in old['werte'] and 'shuttle' in values and mode != 'Nicht angegeben' and mode != old['shuttle_angabe']:
                 conflicting.append('Shuttle-Angabe')
             if old and 'shuttle' in old['werte'] and 'shuttle' in values and old.get('shuttle') != shuttle:
@@ -1070,18 +1083,20 @@ def prepare_field_batch(kader, rows, datum, bogen, correct=False, use_reference=
                 raise ValueError('Bereits gespeichert, abweichend: ' + ', '.join(conflicting) + '. Korrektur ausdrücklich auswählen oder Eingabe berichtigen.')
             event = deepcopy(old) if old else {'id': event_id, 'datum': datum, 'bogen': bogen, 'werte': {}, 'shuttle_angabe': 'Nicht angegeben', 'notiz': '', 'aenderungen': []}
             event['werte'].update(values)
+            if 'sprint' in values:
+                event['sprint_m'] = sprint_m
             if 'shuttle' in values:
                 event['shuttle'] = deepcopy(shuttle)
             if 'shuttle' in values and mode != 'Nicht angegeben':
                 event['shuttle_angabe'] = mode
             if note:
                 event['notiz'] = note
-            change = old is None or any(event.get(k) != old.get(k) for k in ('werte', 'shuttle_angabe', 'notiz', 'shuttle'))
+            change = old is None or any(event.get(k) != old.get(k) for k in ('werte', 'shuttle_angabe', 'notiz', 'shuttle', 'sprint_m'))
             reference_change = False
             if use_reference and 'sprint60' in values:
                 if not 6 <= values['sprint60'] <= 15:
                     raise ValueError('60-m-Referenz der bisherigen Planung erlaubt 6 bis 15 s. Als Testwert ist die Zeit ohne Referenzübernahme speicherbar.')
-                reference_change = rec['t_60'] != values['sprint60']
+                reference_change = rec.get('t_60') != values['sprint60']
                 rec['t_60'] = values['sprint60']
                 if rec.get('t_150_quelle') == 'berechnet':
                     rec['t_150'] = round(rec['t_60'] * 2.375, 2)
@@ -1110,6 +1125,7 @@ def prepare_field_batch(kader, rows, datum, bogen, correct=False, use_reference=
             changed += bool(change or reference_change)
             preview.append({'Person': name, 'Status': status,
                             **{label: values.get(k) for k, label in FIELD_METRICS.items()},
+                            'Sprintstrecke (m)': event.get('sprint_m',60 if 'sprint60' in event['werte'] else None),
                             'Shuttle-Test':shuttle_description(event.get('shuttle')) if 'shuttle' in event['werte'] else '',
                             'Shuttle-Angabe': event['shuttle_angabe'], 'Notiz': event['notiz']})
         except (ValueError, TypeError) as exc:
@@ -1164,6 +1180,7 @@ def render_field_history(record):
         return
     with st.expander('Feldtests aus Testtabelle / Dateiimport'):
         rows = [{'Datum': e['datum'], 'Test': e['bogen'], **{label:e['werte'].get(k) for k,label in FIELD_METRICS.items()},
+                 'Sprintstrecke (m)': e.get('sprint_m',60 if 'sprint60' in e['werte'] else None),
                  'Shuttle-Test':shuttle_description(e.get('shuttle')) if 'shuttle' in e['werte'] else '',
                  'Shuttle-Angabe':e['shuttle_angabe'], 'Notiz':e['notiz']} for e in events]
         st.dataframe(field_display_frame(rows), hide_index=True, width='stretch')
@@ -1255,6 +1272,10 @@ def render_individual_shuttle(record, sport, name, profile_for_save, guest):
 
 def render_test_table():
     st.title('Testtabelle und Dateiimport')
+    capture_mode = st.radio('Erfassungsart', ['Kader und Tests aus Tabelle', 'Testwerte vorhandener Personen'], key='capture_mode', persist_state='session')
+    if capture_mode == 'Kader und Tests aus Tabelle':
+        render_roster_import()
+        return
     st.button('Zur Trainingsplanung', on_click=navigiere, args=('Operativ',))
     st.caption('Am Tablet direkt eintragen oder eine ausgefüllte CSV-/Excel-Tabelle laden. Ein Testdatum je Tabelle; bis zu 1000 Personen. Pro Sprungdisziplin ein Protokoll-/Bestwert.')
     identities = field_identity_map(st.session_state.kader_db)
@@ -1291,6 +1312,7 @@ def render_test_table():
         st.session_state['field_title'] = pending[1] or 'Leistungsanalyse'
         st.session_state['field_shuttle_form'] = (pending[2] or {}).get('form','Bitte wählen')
         st.session_state['field_shuttle_way'] = str((pending[2] or {}).get('weg_m',''))
+        st.session_state['field_shuttle_extra'] = str((pending[2] or {}).get('wendezuschlag_m',''))
         if not pending[0]:
             st.warning('Die Datei enthält kein Testdatum. Bitte das Datum unten einstellen.')
     retained = st.session_state.get('field_metadata', {})
@@ -1302,7 +1324,7 @@ def render_test_table():
     title = right.text_input('Testbezeichnung', value='Leistungsanalyse', max_chars=120, key='field_title')
     shuttle = shuttle_inputs('field_shuttle')
     default_mode = st.selectbox('Shuttle-Angabe für Zeilen ohne eigene Angabe', FIELD_SHUTTLE_MODES, key='field_default_mode')
-    st.session_state.field_metadata = {k:st.session_state[k] for k in ('field_date','field_title','field_shuttle_form','field_shuttle_way','field_default_mode')}
+    st.session_state.field_metadata = {k:st.session_state[k] for k in ('field_date','field_title','field_shuttle_form','field_shuttle_way','field_shuttle_extra','field_default_mode')}
     template_rows = [field_empty_row(identities[n][1], n) for n in names] or [field_empty_row('Name eintragen')]
     c1, c2 = st.columns(2)
     c1.download_button('CSV-Vorlage herunterladen', field_csv(template_rows, datum.isoformat(), title, identities, shuttle, default_mode),
@@ -1342,6 +1364,7 @@ def render_test_table():
     order = (['Name auf Bogen'] if source_needed else []) + ['Zuordnung']
     order += [FIELD_METRICS[k] for k in (['sprint60','shuttle'] if block=='Laufzeiten' else list(JUMP_TESTS) if block=='Sprungweiten' else list(FIELD_METRICS))]
     if block != 'Sprungweiten':
+        order += ['Sprintstrecke (m)', FIELD_METRICS['sprint']] if FIELD_METRICS['sprint'] not in order else ['Sprintstrecke (m)']
         order += ['Shuttle-Angabe','Notiz']
     with table_column:
         edited = st.data_editor(pd.DataFrame(draft, columns=FIELD_COLUMNS).astype(str), hide_index=True, width='stretch',
@@ -1387,6 +1410,479 @@ def render_test_table():
                 st.rerun()
             except (OSError, sqlite3.Error, StorageError, StorageConflict, ValueError) as exc:
                 st.error(f'Nichts gespeichert: {exc}. Den Tabellenentwurf als CSV sichern; bei einem Sitzungskonflikt den Kader neu laden und erneut prüfen.')
+    elif checked:
+        st.info('Eingaben wurden geändert. Bitte erneut prüfen.')
+
+
+# Team-table input is parsed as data only; no workbook formulas or scripts run.
+ROSTER_LABELS = ['Name', 'Alter (Jahre)', 'Geschlecht', 'Altersklasse', 'Gewicht (kg)',
+    'Körperlänge (cm)', 'Typ', 'Entwicklungsstand', 'TE pro Woche', 'Sprintstrecke (m)',
+    'Sprintzeit (s)', 'Shuttle: einfache Strecke (m)', 'Shuttle-Anzahl (1/2/3)',
+    'Wendezuschlag gesamt (m)', 'Shuttlezeit (s)', '5er-Hop links (m)',
+    '5er-Hop rechts (m)', '5er-Schlusssprung (m)', 'Shuttle-Angabe', 'Notiz']
+ROSTER_NEW = 'Neues Profil anlegen'
+
+
+def roster_number(value, label, low, high, whole=False):
+    raw = field_text(value)
+    if not raw:
+        return None
+    if type(value) is bool or not re.fullmatch(r'\d+(?:[.,]\d{1,4})?', raw):
+        raise ValueError(f'{label}: Zahl mit Komma oder Punkt eingeben.')
+    number = float(raw.replace(',', '.'))
+    if not math.isfinite(number) or not low <= number <= high or (whole and number != int(number)):
+        raise ValueError(f'{label}: {low} bis {high}' + (' als ganze Zahl.' if whole else '.'))
+    return int(number) if whole else number
+
+
+def roster_header(value):
+    return re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFKD', field_text(value)).casefold())
+
+
+def roster_table(data, filename):
+    if len(data) > 10_000_000:
+        raise ValueError('Bitte höchstens 10 MB je Tabelle hochladen.')
+    suffix = Path(filename).suffix.lower()
+    limit = FIELD_MAX_ROWS + 20
+    if suffix == '.csv':
+        try:
+            text = data.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            text = data.decode('cp1252')
+        if text.lower().startswith('sep='):
+            text = text.split('\n', 1)[1]
+        first = text.splitlines()[0] if text.splitlines() else ''
+        sep = ';' if ';' in first else '\t' if '\t' in first else ','
+        table = list(csv.reader(io.StringIO(text), delimiter=sep))
+    elif suffix in ('.xlsx', '.ods'):
+        with ZipFile(io.BytesIO(data)) as archive:
+            if sum(x.file_size for x in archive.infolist()) > 50_000_000:
+                raise ValueError('Die entpackte Tabelle ist zu groß.')
+            if suffix == '.ods':
+                xml = archive.read('content.xml')
+                if b'<!DOCTYPE' in xml.upper() or b'<!ENTITY' in xml.upper():
+                    raise ValueError('Diese XML-Struktur wird nicht unterstützt.')
+                ns = {'t':'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
+                      'o':'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
+                      'x':'urn:oasis:names:tc:opendocument:xmlns:text:1.0'}
+                root = ET.fromstring(xml)
+                sheets = root.findall('o:body/o:spreadsheet/t:table', ns)
+                if len(sheets) != 1:
+                    raise ValueError('ODS: bitte genau ein Tabellenblatt verwenden.')
+                def q(prefix, key):
+                    return '{'+ns[prefix]+'}'+key
+                def physical_rows(parent):
+                    for child in parent:
+                        if child.tag == q('t', 'table-row'):
+                            yield child
+                        elif child.tag in {q('t', t) for t in ('table-header-rows','table-rows','table-row-group')}:
+                            yield from physical_rows(child)
+                table = []
+                row_position = 0
+                for row in physical_rows(sheets[0]):
+                    repeat = int(row.get(q('t','number-rows-repeated'), '1'))
+                    if repeat < 1:
+                        raise ValueError('Ungültige Zeilenwiederholung.')
+                    values = []
+                    col = 0
+                    for cell in row:
+                        if cell.tag not in {q('t','table-cell'),q('t','covered-table-cell')}:
+                            continue
+                        count = int(cell.get(q('t','number-columns-repeated'), '1'))
+                        if count < 1:
+                            raise ValueError('Ungültige Spaltenwiederholung.')
+                        kind = cell.get(q('o','value-type'))
+                        value = cell.get(q('o','date-value')) if kind == 'date' else cell.get(q('o','value')) if kind in ('float','percentage','currency') else '\n'.join(''.join(p.itertext()) for p in cell.findall('x:p', ns))
+                        formula = cell.get(q('t','formula'))
+                        if formula:
+                            value = {'formula':formula}
+                        if value and col + count > 40:
+                            raise ValueError('Bitte höchstens 40 Spalten verwenden.')
+                        values += [value] * min(count, max(0, 40-col))
+                        col += count
+                    if any(v not in ('', None) for v in values):
+                        if row_position + repeat > limit:
+                            raise ValueError('Zu viele Tabellenzeilen.')
+                        table += [[None]*40 for _ in range(row_position-len(table))]
+                        table += [list(values) for _ in range(repeat)]
+                    row_position += repeat
+            else:
+                from openpyxl import load_workbook
+                book = load_workbook(io.BytesIO(data), read_only=True, data_only=False, keep_links=False)
+                try:
+                    sheets = [s for s in book.worksheets if s.sheet_state == 'visible']
+                    if len(sheets) != 1:
+                        raise ValueError('Excel: bitte genau ein sichtbares Tabellenblatt verwenden.')
+                    sheet = sheets[0]
+                    if (sheet.max_column or 0) > 40 or (sheet.max_row or 0) > limit:
+                        raise ValueError('Zu viele Zeilen oder Spalten in der Excel-Datei.')
+                    table = [[{'formula':c.value} if c.data_type == 'f' else c.value for c in row]
+                             for row in sheet.iter_rows(max_row=sheet.max_row or limit, max_col=sheet.max_column or 40)]
+                finally:
+                    book.close()
+    else:
+        raise ValueError('Bitte XLSX, ODS oder CSV hochladen. Ein PDF oder Foto enthält hier keine automatisch lesbare Testtabelle.')
+    if len(table) > limit or any(len(row) > 40 for row in table):
+        raise ValueError('Bitte höchstens 1000 Personen und 40 Spalten verwenden.')
+    return table
+
+
+def read_roster_file(data, filename, identities):
+    table = roster_table(data, filename)
+    aliases = {roster_header(label):label for label in ROSTER_LABELS}
+    for old, new in {'Nr.':'Nr.', 'Geschl.(w/m)':'Geschlecht', 'Geschlecht (w/m)':'Geschlecht',
+            'Alter':'Alter (Jahre)', 'Körpergröße (cm)':'Körperlänge (cm)', 'Körpergewicht (kg)':'Gewicht (kg)',
+            'Fasertyp':'Typ', 'Entwicklung':'Entwicklungsstand', 'Shuttle: Gesamtstrecke (m)':'Gesamtstrecke',
+            'Datum':'Datum', 'Testbezeichnung':'Testbezeichnung', 'Team':'Team', 'Kaderbereich':'Kaderbereich',
+            'Schwerpunkt':'Schwerpunkt', 'Zuordnung':'Zuordnung', '60 m (s)':'60 m (s)'}.items():
+        aliases[roster_header(old)] = new
+    header_index = next((i for i, row in enumerate(table[:10]) if any(roster_header(v)=='name' for v in row)), None)
+    if header_index is None:
+        raise ValueError('Keine Namensspalte in den ersten zehn Zeilen gefunden.')
+    raw_headers = list(table[header_index])
+    while raw_headers and not field_text(raw_headers[-1]):
+        raw_headers.pop()
+    headers = [aliases.get(roster_header(v)) for v in raw_headers]
+    if None in headers or len(set(headers)) != len(headers):
+        raise ValueError('Unbekannte oder doppelte Spaltenüberschriften: ' + ', '.join(field_text(v) for v,h in zip(raw_headers,headers) if h is None))
+    metadata = {'datum':None,'team':'','title':'Leistungsanalyse','focus':None}
+    dates, teams, titles, focuses = set(), set(), set(), set()
+    for row in table[:header_index]:
+        for col, value in enumerate(row[:-1]):
+            key = roster_header(value)
+            following = row[col+1]
+            if not field_text(following) or isinstance(following, dict):
+                continue
+            if key == 'datum':
+                dates.add(field_date(following))
+            elif key == 'team':
+                teams.add(field_text(following))
+            elif key == 'schwerpunkt':
+                focuses.add(roster_focus(following))
+    rows = []
+    for line, values in enumerate(table[header_index+1:], header_index+2):
+        record = dict(zip(headers, values))
+        for key,value in list(record.items()):
+            if isinstance(value,str) and value.startswith("'") and value[1:].lstrip().startswith(('=','+','-','@')):
+                record[key] = value[1:]
+        name = field_text(record.get('Name'))
+        meaningful = any(field_text(v) for k,v in record.items() if k not in ('Nr.','Gesamtstrecke'))
+        if not meaningful:
+            continue
+        if not name or len(name) > 120:
+            raise ValueError(f'Zeile {line}: Name fehlt oder ist zu lang.')
+        if any(field_text(v) for v in values[len(headers):]):
+            raise ValueError(f'Zeile {line}: Werte ohne Spaltenüberschrift.')
+        for key, value in record.items():
+            if key != 'Gesamtstrecke' and (isinstance(value, dict) or (isinstance(value,str) and value.startswith('='))):
+                raise ValueError(f'Zeile {line}, {key}: Bitte einen eingetragenen Wert statt einer Formel verwenden.')
+        row = {label:field_text(record.get(label)) for label in ROSTER_LABELS}
+        if record.get('60 m (s)') not in (None,''):
+            if row['Sprintzeit (s)'] or row['Sprintstrecke (m)']:
+                raise ValueError(f'Zeile {line}: 60-m-Zeit und variable Sprintangabe bitte nicht doppelt verwenden.')
+            row['Sprintzeit (s)'] = field_text(record['60 m (s)'])
+            row['Sprintstrecke (m)'] = '60'
+        total = record.get('Gesamtstrecke')
+        row['Gesamtstrecke zur Kontrolle'] = '' if isinstance(total,dict) or field_text(total).startswith('=') else field_text(total)
+        row['Zuordnung'] = field_match(name, field_text(record.get('Kaderbereich')), identities) or ROSTER_NEW
+        row['Quellzeile'] = str(line)
+        for key, values_set in [('Datum',dates),('Team',teams),('Testbezeichnung',titles),('Schwerpunkt',focuses)]:
+            if field_text(record.get(key)):
+                values_set.add(field_date(record[key]) if key=='Datum' else roster_focus(record[key]) if key=='Schwerpunkt' else field_text(record[key]))
+        rows.append(row)
+    if not rows or len(rows) > FIELD_MAX_ROWS:
+        raise ValueError('Bitte 1 bis 1000 Personen in einer Datei erfassen.')
+    if any(len(values) > 1 for values in (dates,teams,titles,focuses)):
+        raise ValueError('Eine Tabelle darf nur ein Team, Testdatum, einen Schwerpunkt und eine Testbezeichnung enthalten.')
+    metadata.update(datum=next(iter(dates),None),team=next(iter(teams),''),title=next(iter(titles),'Leistungsanalyse'),focus=next(iter(focuses),None))
+    return rows, metadata
+
+
+def roster_focus(value):
+    normalized = roster_header(value)
+    if normalized in ('komplex','fussball1','fuball1komplextraining','fussball1komplextraining'):
+        return 'komplex'
+    if normalized in ('speedjump','fussball2','fuball2speedandjump','fussball2speedandjump'):
+        return 'speed_jump'
+    raise ValueError('Schwerpunkt: Fußball 1 – Komplextraining oder Fußball 2 – Speed and Jump auswählen.')
+
+
+def roster_enum(value, label, choices):
+    normalized = roster_header(value)
+    if not normalized:
+        return None
+    if normalized not in choices:
+        raise ValueError(f'{label}: unbekannte Angabe „{field_text(value)}“.')
+    return choices[normalized]
+
+
+def prepare_roster_batch(kader, rows, datum, bogen, focus, team='', correct=False, use_reference=True, default_mode='Nicht angegeben'):
+    datum = field_date(datum)
+    if focus not in FOCUS_LABELS or not field_text(bogen) or len(bogen) > 120 or len(team) > 120:
+        raise ValueError('Schwerpunkt, Team oder Testbezeichnung prüfen.')
+    if not rows or len(rows) > FIELD_MAX_ROWS:
+        raise ValueError('Bitte 1 bis 1000 Personen erfassen.')
+    updated = validate_kader(kader)
+    identities = field_identity_map(updated)
+    seen, previews, errors = set(), [], []
+    changed = 0
+    for index, row in enumerate(rows, 1):
+        try:
+            source_name = field_text(row.get('Name'))
+            if not source_name or len(source_name) > 120:
+                raise ValueError('Name fehlt oder ist zu lang.')
+            identity = row.get('Zuordnung', ROSTER_NEW)
+            if identity == ROSTER_NEW:
+                matches = [p for p in identities.values() if field_name_key(p[1]) == field_name_key(source_name)]
+                if matches:
+                    raise ValueError('Dieser Name ist bereits vorhanden. Bitte die vorhandene Person zuordnen.')
+                sport, name = 'Fussball', source_name
+                old = None
+            elif identity in identities:
+                sport, name = identities[identity]
+                old = updated[sport][name]
+            else:
+                raise ValueError('Bitte eine gültige Person zuordnen oder „Neues Profil anlegen“ wählen.')
+            name_key = (sport, field_name_key(name))
+            if name_key in seen:
+                raise ValueError('Diese Person ist mehrfach in der Tabelle vorhanden.')
+            seen.add(name_key)
+            values = {
+                'alter':roster_number(row.get('Alter (Jahre)'), 'Alter',9,40,True),
+                'gewicht':roster_number(row.get('Gewicht (kg)'), 'Gewicht (kg)',30,140),
+                'groesse':roster_number(row.get('Körperlänge (cm)'), 'Körperlänge (cm)',130,215),
+                'geschlecht':roster_enum(row.get('Geschlecht'),'Geschlecht',{'w':'Weiblich','weiblich':'Weiblich','m':'Männlich','mannlich':'Männlich'}),
+                'fasertyp':roster_enum(row.get('Typ'),'Typ',{'ausdauer':'Ausdauer','kraft':'Kraft','sprungkraft':'Sprungkraft','gazelle':'Gazelle','sprint':'Schnelligkeit (Sprint)','schnelligkeitsprint':'Schnelligkeit (Sprint)'}),
+                'reife':roster_enum(row.get('Entwicklungsstand'),'Entwicklungsstand',{'normal':'Normalentwickler','normalentwickler':'Normalentwickler','spatentwickler':'Spätentwickler (Retardiert)','retardiert':'Spätentwickler (Retardiert)','spatentwicklerretardiert':'Spätentwickler (Retardiert)','fruhentwickler':'Frühentwickler (Akzeleriert)','akzeleriert':'Frühentwickler (Akzeleriert)','fruhentwicklerakzeleriert':'Frühentwickler (Akzeleriert)'})}
+            if values['groesse'] is not None:
+                values['groesse'] = round(values['groesse']/100,4)
+            band_value = 'Master' if field_text(row.get('Altersklasse')).upper() in ('Ü23','Ü 23','ÜBER 23','23+') else row.get('Altersklasse')
+            band = roster_enum(band_value, 'Altersklasse', {**{b.lower():b for b in ('U11','U13','U15','U17','U20','U23')},'u23plus':'MASTER','master':'MASTER','erwachsene':'MASTER'})
+            # NFKD strips the umlaut; Ü23 must not be confused with U23.
+            if field_text(row.get('Altersklasse')).upper() in ('Ü23','Ü 23','ÜBER 23','23+'):
+                band = 'MASTER'
+            frequency = roster_number(row.get('TE pro Woche'), 'TE pro Woche',1,2,True)
+            if old is None and (any(v is None for v in values.values()) or band is None or frequency is None):
+                raise ValueError('Für ein neues Profil bitte Alter, Geschlecht, Altersklasse, Gewicht, Körperlänge, Typ, Entwicklungsstand und TE pro Woche ausfüllen.')
+            rec = deepcopy(old) if old else {'t_60':None,'sbe':'SR 2'}
+            rec.update({k:v for k,v in values.items() if v is not None})
+            band = band or rec['profil'].split('_')[1]
+            gender = rec.get('geschlecht', 'Weiblich' if rec.get('profil','').endswith('_w') else 'Männlich')
+            profile = football_profile('Fussball_'+band, gender)
+            rec['profil'] = storage_profile(profile, sport)
+            settings = {key:focus_settings(rec,key) for key in FOCUS_LABELS}
+            active = settings.setdefault(focus, {'planung':{}})
+            if frequency is not None:
+                active.setdefault('planung',{})['einheiten'] = frequency
+            rec['trainingsschwerpunkt'] = focus
+            rec['planung'] = deepcopy(active.get('planung',{}))
+            # Keep other planning fields while resetting parameters tied to a changed age band.
+            if old and old['profil'].split('_')[1] != band:
+                rec['m_training'] = m_training_defaults(sport,band)
+                for config in settings.values():
+                    config['m_training'] = m_training_defaults('Fussball',band)
+                    config['hurdles'] = {}
+                    config['hurdles_band'] = band
+                    if config.get('speed_jump'):
+                        config['speed_jump'] = normalize_speed_jump(config['speed_jump'],band,gender)
+            rec['fussball_schwerpunkte'] = settings
+            if team:
+                rec['team'] = team
+            distance = roster_number(row.get('Sprintstrecke (m)'), 'Sprintstrecke (m)',.01,10000)
+            seconds = field_number(row.get('Sprintzeit (s)'), 'Sprintzeit (s)')
+            if seconds is not None and distance is None:
+                raise ValueError('Zur Sprintzeit fehlt die Sprintstrecke.')
+            if use_reference and distance == 60 and seconds is not None:
+                if not 6 <= seconds <= 15:
+                    raise ValueError('Die Trainingsreferenz verlangt 6 bis 15 s über 60 m. Referenzübernahme ausschalten, um nur den Test zu speichern.')
+                rec['t_60'] = seconds
+                if rec.get('t_150_quelle','berechnet') == 'berechnet':
+                    rec['t_150'] = round(seconds*2.375,2)
+                    rec['t_150_quelle'] = 'berechnet'
+            diffs = []
+            if old:
+                for key in ('alter','gewicht','groesse','geschlecht','fasertyp','reife','profil','trainingsschwerpunkt','team','t_60'):
+                    if rec.get(key) != old.get(key):
+                        diffs.append(f'{key}: {old.get(key, "leer")} → {rec.get(key, "leer")}')
+                previous_frequency = focus_settings(old,focus).get('planung',{}).get('einheiten',1)
+                if frequency is not None and frequency != previous_frequency:
+                    diffs.append(f'TE/Woche: {previous_frequency} → {frequency}')
+                if diffs and not correct:
+                    raise ValueError('Abweichende Stammdaten: ' + '; '.join(diffs) + '. Zum Übernehmen die Korrekturoption wählen.')
+            updated[sport][name] = rec
+            testrow = field_empty_row(name, f'{name} [{sport}]')
+            for label in ('Shuttlezeit (s)','5er-Hop links (m)','5er-Hop rechts (m)','5er-Schlusssprung (m)','Shuttle-Angabe','Notiz'):
+                testrow[label] = field_text(row.get(label))
+            if seconds is not None:
+                testrow['60 m (s)' if distance == 60 else 'Sprintzeit (s)'] = str(seconds)
+                testrow['Sprintstrecke (m)'] = str(distance)
+            # Validate provided arrangement even when its measurement is still blank.
+            way = roster_number(row.get('Shuttle: einfache Strecke (m)'), 'Strecke je Weg',.01,10000)
+            count = roster_number(row.get('Shuttle-Anzahl (1/2/3)'), 'Shuttle-Anzahl',1,3,True)
+            extra = roster_number(row.get('Wendezuschlag gesamt (m)'), 'Wendezuschlag gesamt (m)',0,1000) or 0
+            config = shuttle_definition(next(k for k,v in SHUTTLE_FORMS.items() if v==count),way,extra) if way is not None and count is not None else None
+            total = roster_number(row.get('Gesamtstrecke zur Kontrolle'), 'Gesamtstrecke',.01,61000)
+            if total is not None and (config is None or not math.isclose(total,way*2*count+extra,abs_tol=.001)):
+                raise ValueError('Gesamtstrecke passt nicht zu einfacher Strecke, Shuttle-Anzahl und Wendezuschlag.')
+            has_results = any(field_text(testrow.get(label)) for label in FIELD_METRICS.values())
+            test_preview = {}
+            if has_results:
+                updated, test_rows, _, _ = prepare_field_batch(updated,[testrow],datum,bogen,correct=correct,shuttle=config,default_mode=default_mode)
+                test_preview = test_rows[0]
+                rec = updated[sport][name]
+            # Retain documented planned distances, including rows awaiting results.
+            protocol = {label:field_text(row.get(label)) for label in ROSTER_LABELS if field_text(row.get(label))}
+            import_id = hashlib.sha256(json.dumps([datum,bogen.casefold()],ensure_ascii=False).encode()).hexdigest()
+            imports = rec.setdefault('tabellenimporte', {})
+            previous = imports.get(import_id)
+            entry = {'datum':datum,'bogen':bogen,'team':team,'angaben':protocol}
+            if previous != entry:
+                imports[import_id] = entry
+            rec_changed = old is None or rec != old
+            changed += rec_changed
+            notice = '; '.join(diffs)
+            if not age_matches_profile(rec['alter'],rec['profil']):
+                notice += '; Alter und Trainingsklasse bitte prüfen'
+            if rec.get('t_60') is None:
+                notice += '; 60-m-Trainingsreferenz noch offen'
+            previews.append({'Person':name,'Aktion':'Neu anlegen' if old is None else 'Aktualisieren' if rec_changed else 'Bereits gespeichert',
+                'Alter':rec['alter'],'Geschlecht':gender,'Altersklasse':'Ü23 / Master' if band=='MASTER' else band,
+                'kg':rec['gewicht'],'cm':round(rec['groesse']*100,2),'Typ':rec['fasertyp'],'Entwicklung':rec['reife'],
+                'TE/Woche':rec['planung'].get('einheiten',1),'Schwerpunkt':FOCUS_LABELS[focus],
+                'Sprint (m)':distance,'Sprint (s)':seconds,'Shuttle-Test':shuttle_description(config) if config else '',
+                **{k:v for k,v in test_preview.items() if k in ('Shuttlezeit (s)','5er-Hop links (m)','5er-Hop rechts (m)','5er-Schlusssprung (m)','Shuttle-Angabe')},
+                'Hinweise':notice.strip('; ')})
+        except (ValueError,TypeError) as exc:
+            errors.append(f'Zeile {row.get("Quellzeile",index)} ({field_text(row.get("Name"))}): {exc}')
+    if errors:
+        raise ValueError('\n'.join(errors[:30]))
+    return validate_kader(updated), previews, changed
+
+
+def roster_csv(rows, datum, bogen, team, focus, identities=None):
+    stream = io.StringIO(newline='')
+    labels = ['Datum','Testbezeichnung','Team','Schwerpunkt','Kaderbereich',*ROSTER_LABELS]
+    writer = csv.DictWriter(stream,labels,delimiter=';',lineterminator='\n')
+    writer.writeheader()
+    for row in rows:
+        values = {'Datum':datum,'Testbezeichnung':bogen,'Team':team,'Schwerpunkt':FOCUS_LABELS[focus],
+                  **{k:field_text(row.get(k)) for k in ROSTER_LABELS}}
+        identity = (identities or {}).get(row.get('Zuordnung'))
+        values['Kaderbereich'] = identity[0] if identity else ''
+        if identity:
+            values['Name'] = identity[1]
+        values = {k:"'"+v if v.lstrip().startswith(('=','+','-','@')) else v for k,v in values.items()}
+        writer.writerow(values)
+    return stream.getvalue().encode('utf-8-sig')
+
+
+def roster_sync_grid(key):
+    draft = deepcopy(st.session_state.get('roster_draft',[]))
+    for index, changes in st.session_state.get(key,{}).get('edited_rows',{}).items():
+        if 0 <= int(index) < len(draft):
+            for label, value in changes.items():
+                if label in ROSTER_LABELS or label == 'Zuordnung':
+                    draft[int(index)][label] = field_text(value)
+    st.session_state.roster_draft = draft
+
+
+def render_roster_import():
+    st.button('Zur Trainingsplanung', on_click=navigiere, args=('Operativ',))
+    st.caption('Stammdaten und Testergebnisse gemeinsam aus Excel, LibreOffice oder CSV übernehmen. Erst laden, kontrollieren, dann gemeinsam speichern. Ein PDF oder Foto ist hier kein Tabellenimport.')
+    identities = field_identity_map(st.session_state.kader_db)
+    draft = st.session_state.get('roster_draft')
+    with st.expander('Tabelle laden', expanded=draft is None):
+        upload = st.file_uploader('Ausgefüllte Stammdaten- und Testtabelle',type=['xlsx','ods','csv'],key='roster_upload')
+        allow_replace = st.checkbox('Bisherigen Tabellenentwurf ersetzen',key='roster_replace') if draft else True
+        if st.button('Stammdaten-Tabelle laden',disabled=upload is None or not allow_replace):
+            try:
+                rows, metadata = read_roster_file(upload.getvalue(),upload.name,identities)
+                st.session_state.roster_draft = rows
+                st.session_state.roster_pending = metadata
+                st.session_state.roster_epoch = st.session_state.get('roster_epoch',0)+1
+                st.session_state.pop('roster_preview',None)
+                st.rerun()
+            except Exception as exc:
+                st.error(f'Datei nicht geladen: {exc}')
+        if st.button('Leere Erfassung für 30 Personen öffnen',disabled=not allow_replace):
+            st.session_state.roster_draft = [{**{label:'' for label in ROSTER_LABELS},'Zuordnung':ROSTER_NEW} for _ in range(30)]
+            st.session_state.roster_epoch = st.session_state.get('roster_epoch',0)+1
+            st.session_state.pop('roster_preview',None)
+            st.rerun()
+    pending = st.session_state.pop('roster_pending',None)
+    if pending:
+        st.session_state.roster_date = date.fromisoformat(pending['datum']) if pending['datum'] else date.today()
+        st.session_state.roster_team = pending['team']
+        st.session_state.roster_title = pending['title']
+        st.session_state.roster_focus = pending['focus'] or 'speed_jump'
+        if not pending['datum']:
+            st.warning('Testdatum fehlt in der Datei. Bitte unten einstellen.')
+    for key, value in st.session_state.get('roster_metadata',{}).items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+    a,b = st.columns(2)
+    datum = a.date_input('Testdatum der Tabelle',key='roster_date')
+    team = b.text_input('Team / Trainingsgruppe',max_chars=120,key='roster_team')
+    title = st.text_input('Bezeichnung des Testtermins',value='Leistungsanalyse',max_chars=120,key='roster_title')
+    focus = st.selectbox('Schwerpunkt für die importierten Personen',list(FOCUS_LABELS),index=1,format_func=FOCUS_LABELS.get,key='roster_focus')
+    mode = st.selectbox('Shuttlezeiten ohne Kennzeichnung übernehmen als',FIELD_SHUTTLE_MODES,index=2,key='roster_mode')
+    st.caption('1 Shuttle = hin UND zurück. Gesamtstrecke = einfache Strecke × 2 × Shuttle-Anzahl + Wendezuschlag für den gesamten Test. Ü23 wird der vorhandenen Trainingsklasse Master zugeordnet.')
+    st.session_state.roster_metadata = {k:st.session_state[k] for k in ('roster_date','roster_team','roster_title','roster_focus','roster_mode')}
+    draft = st.session_state.get('roster_draft')
+    if draft is None:
+        return
+    view = st.radio('Tabellenausschnitt',['Stammdaten','Lauftests','Sprungtests','Alle Angaben'],horizontal=True,key='roster_view')
+    shared = ['Name','Zuordnung']
+    sections = {'Stammdaten':ROSTER_LABELS[1:9],'Lauftests':ROSTER_LABELS[9:15]+['Shuttle-Angabe'],
+                'Sprungtests':ROSTER_LABELS[15:18]+['Notiz'],'Alle Angaben':ROSTER_LABELS[1:]}
+    epoch = st.session_state.get('roster_epoch',0)
+    key = f'roster_grid_{epoch}'
+    columns = {label:st.column_config.TextColumn(label,width='small' if label not in ('Name','Notiz','Entwicklungsstand') else 'medium') for label in ROSTER_LABELS}
+    columns['Zuordnung'] = st.column_config.SelectboxColumn('Zuordnung',options=[ROSTER_NEW,*identities],width='medium')
+    columns['Shuttle-Angabe'] = st.column_config.SelectboxColumn('Shuttle-Angabe',options=['',*FIELD_SHUTTLE_MODES])
+    st.caption('Eindeutig vorhandene Namen werden zugeordnet. Bei anderer Schreibweise bitte die richtige Person auswählen, um Doppelprofile zu vermeiden. Leere Angaben ändern vorhandene Stammdaten nicht.')
+    edited = st.data_editor(pd.DataFrame(draft).fillna('').astype(str),hide_index=True,width='stretch',height=450,row_height=42,
+        column_order=shared+sections[view],column_config=columns,num_rows='fixed',key=key,on_change=roster_sync_grid,args=(key,))
+    rows = edited.to_dict('records')
+    # Ignore unused template slots, but never drop a row containing an entered value.
+    rows = [r for r in rows if any(field_text(r.get(k)) for k in ROSTER_LABELS)]
+    st.download_button('Erfassungsentwurf herunterladen (CSV)',roster_csv(rows,datum.isoformat(),title,team,focus,identities),file_name='Doc_Athletic_Kader_und_Tests.csv',mime='text/csv')
+    correct = st.checkbox('Abweichende vorhandene Stammdaten und Testwerte übernehmen',key='roster_correct')
+    use_reference = st.checkbox('Vorhandene 60-m-Testzeiten als Trainingsreferenz übernehmen',value=True,key='roster_reference')
+    state = dict(rows=rows,datum=datum.isoformat(),bogen=title,focus=focus,team=team,correct=correct,use_reference=use_reference,default_mode=mode)
+    fingerprint = hashlib.sha256(json.dumps(state,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
+    if st.button('Kader und Tests prüfen',type='primary'):
+        try:
+            _, preview, changed = prepare_roster_batch(st.session_state.kader_db,**state)
+            st.session_state.roster_preview = dict(fingerprint=fingerprint,revision=st.session_state.kader_revision,preview=preview,changed=changed)
+        except ValueError as exc:
+            st.session_state.pop('roster_preview',None)
+            st.error(str(exc))
+    checked = st.session_state.get('roster_preview')
+    if checked and checked['fingerprint'] == fingerprint:
+        st.subheader('Kontrolle vor der Übernahme')
+        st.dataframe(pd.DataFrame(checked['preview']),hide_index=True,width='stretch')
+        st.caption(f"{len(checked['preview'])} Personen geprüft; {checked['changed']} mit Änderungen. Fehlende Testergebnisse bleiben leer. Andere Profile und bisherige Trainingsverläufe bleiben erhalten.")
+        if st.button('Geprüften Kader und Tests gemeinsam speichern',disabled=not checked['changed'],type='primary'):
+            try:
+                if checked['revision'] != st.session_state.kader_revision:
+                    raise StorageConflict('Der Kader hat sich seit der Prüfung geändert. Bitte erneut prüfen.')
+                candidate, _, changed = prepare_roster_batch(st.session_state.kader_db,**state)
+                revision = speichere_kader_in_datei(candidate,checked['revision'])
+                st.session_state.kader_db = candidate
+                st.session_state.kader_revision = revision
+                st.session_state.edit_epoch = st.session_state.get('edit_epoch',0)+1
+                identities_after = field_identity_map(candidate)
+                for row in rows:
+                    if row.get('Zuordnung') == ROSTER_NEW:
+                        row['Zuordnung'] = field_match(row['Name'],'Fussball',identities_after)
+                st.session_state.roster_draft = rows
+                st.session_state.roster_epoch = epoch+1
+                st.session_state.pop('roster_preview',None)
+                st.session_state.save_notice = f'Kader und Tests für {changed} Personen gespeichert. Bitte anschließend eine Kader-Sicherung herunterladen.'
+                st.rerun()
+            except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:
+                st.error(f'Nichts gespeichert: {exc}')
     elif checked:
         st.info('Eingaben wurden geändert. Bitte erneut prüfen.')
 
@@ -2154,8 +2650,10 @@ def validate_kader(kader):
                 raise ValueError("Ungültiger Athletenname.")
             if not isinstance(p, dict):
                 raise ValueError("Ungültiges Athletenprofil.")
-            for field, low, high in [("alter",10,40),("groesse",1.30,2.15),("gewicht",30,140),("t_60",6,15)]:
+            for field, low, high in [("alter",9,40),("groesse",1.30,2.15),("gewicht",30,140),("t_60",6,15)]:
                 value = p.get(field)
+                if field == "t_60" and "t_60" in p and value is None:
+                    continue
                 if type(value) not in (int, float) or not math.isfinite(value) or not low <= value <= high:
                     raise ValueError(f"Ungültiger Wert im Feld {field}.")
             if int(p["alter"]) != p["alter"]:
@@ -2731,7 +3229,7 @@ elif st.session_state.navigations_status == 'Operativ':
         modus, ziel)
 
     with c2:
-        alter = st.number_input("Alter (Jahre)", min_value=10, max_value=40, value=int(aktuelle_daten["alter"]), key=key_for("alter"), disabled=(st.session_state.auth_modus == "gast" or modus == "Gruppe / Team (Kader)"))
+        alter = st.number_input("Alter (Jahre)", min_value=9, max_value=40, value=int(aktuelle_daten["alter"]), key=key_for("alter"), disabled=(st.session_state.auth_modus == "gast" or modus == "Gruppe / Team (Kader)"))
         geschlecht_wahl = st.selectbox("Geschlecht", ["Männlich", "Weiblich"], index=1 if aktuelle_daten.get("geschlecht", "Weiblich" if profil_soll.endswith("_w") else "Männlich") == "Weiblich" else 0, key=key_for("geschlecht"), disabled=(st.session_state.auth_modus == "gast"))
 
     with c3:
@@ -2887,19 +3385,19 @@ elif st.session_state.navigations_status == 'Operativ':
 
     diag_col1, diag_col2 = st.columns(2)
     with diag_col1:
-        t_60 = st.number_input("60m-Referenz (s)", min_value=6.0, max_value=15.0, value=float(aktuelle_daten.get("t_60", 7.80)), step=0.01, key=key_for("t_60"), disabled=(st.session_state.auth_modus == "gast"))
+        t_60 = st.number_input("60m-Referenz (s)", min_value=6.0, max_value=15.0, value=float(aktuelle_daten["t_60"]) if aktuelle_daten.get("t_60") is not None else None, step=0.01, key=key_for("t_60"), disabled=(st.session_state.auth_modus == "gast"))
     with diag_col2:
-        auto_150 = round(t_60 * 2.375, 2)
+        auto_150 = round(t_60 * 2.375, 2) if t_60 is not None else None
         quellen = ["berechnet", "gemessen", "ungeklärt"]
         quelle_default = aktuelle_daten.get("t_150_quelle", "ungeklärt" if "t_150" in aktuelle_daten else "berechnet")
         quelle_150 = st.selectbox("Herkunft der 150-m-Zeit", quellen, index=quellen.index(quelle_default),
             key=key_for("quelle150"), disabled=(st.session_state.auth_modus == "gast"))
         if quelle_150 == "berechnet":
             t_150 = auto_150
-            st.metric("150-m-Richtwert (berechnet)", f"{t_150:.2f} s")
+            st.metric("150-m-Richtwert (berechnet)", f"{t_150:.2f} s" if t_150 is not None else "Noch offen")
         else:
             t_150 = st.number_input("150m-Referenz (s)", min_value=0.01, max_value=120.0,
-                value=float(aktuelle_daten.get("t_150", auto_150)), step=0.01,
+                value=float(aktuelle_daten.get("t_150", auto_150)) if aktuelle_daten.get("t_150", auto_150) is not None else None, step=0.01,
                 key=key_for("t_150"), disabled=(st.session_state.auth_modus == "gast"))
             if quelle_150 == "ungeklärt":
                 st.caption("Übernommener Wert: Bitte bestätigen, ob diese Zeit gemessen wurde.")
@@ -2947,7 +3445,7 @@ elif st.session_state.navigations_status == 'Operativ':
         record.update({"alter": int(alter), "groesse": float(groesse), "gewicht": float(gewicht), "profil": storage_profile(profil_soll, save_sport),
             "phasensteuerung":({**phase_config,"references":{},"jumps_ready":False,"spruenge_ready":False} if create_new and ziel in aktive_athleten_db else phase_config), "lastreferenz":({} if create_new and ziel in aktive_athleten_db else load_reference), "geschlecht": geschlecht_wahl, "fasertyp": ft, "reife": reife, "sbe": sbe_ziel, "notizen": profile_notes,
             "m_training": (m_training_defaults(save_sport, band) if create_new or save_sport != "Fussball" else m_config),
-            "t_60": float(t_60), "t_150": float(t_150), "t_150_quelle": quelle_150, "planung":plan_settings, "tempo_referenzen":tempo_references})
+            "t_60": float(t_60) if t_60 is not None else None, "t_150": float(t_150) if t_150 is not None else None, "t_150_quelle": quelle_150, "planung":plan_settings, "tempo_referenzen":tempo_references})
         settings_by_focus[focus] = {"planung": deepcopy(plan_settings),
             "m_training": m_training_defaults("Fussball", band) if create_new and ziel in aktive_athleten_db else deepcopy(m_config),
             "speed_jump": deepcopy(speed_config), "hurdles": deepcopy(hurdle_config), "hurdles_band": band}
@@ -2960,6 +3458,8 @@ elif st.session_state.navigations_status == 'Operativ':
                 settings["speed_jump"] = normalize_speed_jump(settings["speed_jump"], band, geschlecht_wahl)
             if settings.get("m_training", {}).get("band", band) != band:
                 settings["m_training"] = m_training_defaults("Fussball", band)
+        if record.get("t_150") is None:
+            record.pop("t_150", None)
         record["fussball_schwerpunkte"] = settings_by_focus
         record["trainingsschwerpunkt"] = focus
         return record
@@ -3058,6 +3558,10 @@ elif st.session_state.navigations_status == 'Operativ':
     st.markdown("</div>", unsafe_allow_html=True)
 
     reife_intern = "Spätentwickler" if "Spät" in reife else "Frühentwickler" if "Früh" in reife else "Normalentwickler"
+
+    if t_60 is None or t_150 is None:
+        st.info("Profil und Tests können gespeichert werden. Für berechnete Laufzeiten und die vollständige Trainingsausgabe bitte die fehlende Sprintreferenz oben ergänzen. Es wird keine Ersatzzeit eingesetzt.")
+        st.stop()
 
     st.subheader("Testzeiten und berechnete Richtwerte")
     calc_100 = round(t_60 * 1.615, 2)

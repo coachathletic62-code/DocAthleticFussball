@@ -1638,7 +1638,7 @@ def protocol_rows(frame):
             clean[k]="" if pd.isna(clean[k]) else str(clean[k]).strip()
         rows.append(clean)
     return rows
-"""Modul 1 Version 115: explicit coach-defined reference calculation, no telemetry control."""
+# Dokumentierte Trainerreferenzen; keine automatische Sensorsteuerung.
 POWERBAGS = (5,8,10,12,15,17,20)
 VBT_KINDS = ('Nicht zugeordnet','Mittlere konzentrische Geschwindigkeit','Spitzengeschwindigkeit')
 # Doc Athletic: getrennte Ball-Erwärmung und maximale M-Sprints, 20.09.2026.
@@ -2691,12 +2691,13 @@ def generate_unit(record, focus, te, name="Athlet"):
     html_matrix = organize_multisport_html(html_matrix, einheiten, short_day, main_sets, "Fussball", band, org_config, timing, focus, block_rounds)
     return html_matrix
 
+st.title('Doc Athletic Train Smart Evolution Software')
+st.caption('Fußball 120 · '+BUILD_STAND)
 auth_fingerprint = hashlib.sha256(json.dumps([TRAINER_CODE,GAST_CODE,DATABASE_URL]).encode()).hexdigest()
 if st.session_state.get("auth_fingerprint") != auth_fingerprint:
     st.session_state.clear()
     st.session_state.auth_fingerprint = auth_fingerprint
 if not TRAINER_CODE:
-    st.title("Doc Athletic Train Smart Evolution Software 120")
     st.info("Trainerzugang einrichten: In den Streamlit-Einstellungen unter Secrets den Eintrag DOC_ATHLETIC_TRAINER_CODE mit einem eigenen Zugangscode speichern. Danach die App neu laden.")
     st.stop()
 if DATABASE_URL:
@@ -2741,8 +2742,6 @@ def navigiere(ziel):
     st.session_state.navigations_status = ziel
 
 # APP_ROUTING
-st.title('Doc Athletic Train Smart Evolution Software')
-st.caption('Fußball 120 · '+BUILD_STAND)
 for label,target in [('Training','Operativ'),('Athleten','Athleten'),('Tests / Import','Testtabelle'),('Datensicherung','Backup')]:
     if st.session_state.auth_modus=='gast' and target in ('Testtabelle','Backup'):continue
     st.sidebar.button(label,on_click=navigiere,args=(target,),key='nav_'+target)

@@ -120,7 +120,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '24.09.2026, 13:03 Uhr deutscher Zeit · zentrale Übersicht · lesbare gespeicherte Trainingspläne'
+BUILD_STAND = '24.09.2026, 13:23 Uhr deutscher Zeit · zentrale Übersicht · Lauf-ABC: 2 × Shuttle'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -2260,7 +2260,7 @@ def render_cycle_controls(record,sport,name,key):
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
 
 def saved_plan_html(plan):
-    """Gespeicherten Wortlaut darstellen; keine Trainingswerte neu berechnen."""
+    """Gespeicherten Plan darstellen; alte ABC-Bezeichnung angleichen, Werte erhalten."""
     headers=[['Block / Phase','Trainingsmittel / Übung','Sätze','Wdh. / Distanz',
               'Hardware / Zusatzlast','Intensität','Pause'],
              ['Abschnitt','Soll','Ist','Abweichung']]
@@ -2284,6 +2284,12 @@ def saved_plan_html(plan):
                 row=cells(lines[end])
                 if row is None or len(row)!=len(header):
                     break
+                if len(row)==7 and row[0]=='Block 1: ABC':
+                    old_label=re.fullmatch(r'2 (?:Bahnen|Shuttle) insgesamt(; je einmal in beide Richtungen)?',row[2])
+                    if old_label:
+                        row[2]='2 × Shuttle'
+                        if old_label[1] and old_label[1].lstrip('; ') not in row[3]:
+                            row[3]+=old_label[1]
                 rows.append(row); end+=1
             if rows:
                 rendered.append('<div class="plan-table"><table><thead><tr>'+''.join(

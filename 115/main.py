@@ -120,7 +120,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '24.09.2026, 13:23 Uhr deutscher Zeit · zentrale Übersicht · Lauf-ABC: 2 × Shuttle'
+BUILD_STAND = '24.09.2026, 14:08 Uhr deutscher Zeit · Lauftest manuell eintragen und korrigieren'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -1889,6 +1889,8 @@ def validate_kader(kader):
             for seconds in references.values():
                 if type(seconds) not in (int,float) or not math.isfinite(seconds) or not 0 <= seconds <= 1800:
                     raise ValueError("Testzeiten müssen zwischen 0 und 1800 Sekunden liegen; 0 bedeutet fehlend.")
+            if 'lauftest' in p:
+                validate_run_reference(p['lauftest'])
             validate_m_training(p.get("m_training", {}), sport, p["profil"].split("_")[1])
             m_references = p.get('m_lauf_referenzen',[])
             if not isinstance(m_references,list):
@@ -2117,9 +2119,84 @@ def athlete_tempo(record, focus='komplex'):
     t150=record.get('t_150') if source!='berechnet' else round(record['t_60']*2.375,2)
     if t150 is None:
         return []
+    test=run_reference(record,focus)
+    references=deepcopy(record.get('tempo_referenzen',{}))
+    if 'lauftest' in record:
+        references.pop(str(test['distanz_m']),None)
+    rows=build_tempo_table(record['t_60'],t150,source,references,
+                          test['distanz_m'],test['zeit_s'] or 0,True,False)
+    if 'lauftest' in record:
+        for row in rows:
+            if row['Herkunft']=='Referenz: Einzeltest':
+                row['Herkunft']='Gemessener Lauftest · '+test['durchfuehrung']
+    return rows
+
+RUN_MODES = ['Nicht angegeben','Einzellauf','Gruppenlauf']
+
+def validate_run_reference(test):
+    if not isinstance(test,dict) or set(test)!={'distanz_m','zeit_s','durchfuehrung'}:
+        raise ValueError('Lauftest: Strecke, gemessene Zeit und Durchführung prüfen.')
+    if type(test['distanz_m']) is not int or not 50 <= test['distanz_m'] <= 1500:
+        raise ValueError('Laufteststrecke: ganze Meter zwischen 50 und 1500 eingeben.')
+    if type(test['zeit_s']) not in (int,float) or not math.isfinite(test['zeit_s']) or not 0 < test['zeit_s'] <= 900:
+        raise ValueError('Gemessene Laufzeit: mehr als 0 und höchstens 900 Sekunden eingeben.')
+    if test['durchfuehrung'] not in RUN_MODES:
+        raise ValueError('Durchführung des Lauftests prüfen.')
+
+def run_reference(record,focus):
+    if 'lauftest' in record:
+        return deepcopy(record['lauftest'])
     plan=focus_settings(record,focus).get('planung',{})
-    return build_tempo_table(record['t_60'],t150,source,record.get('tempo_referenzen',{}),
-                            int(plan.get('test_distanz',800)),float(plan.get('test_zeit',0)),True,False)
+    return {'distanz_m':int(plan.get('test_distanz',800)),
+            'zeit_s':float(plan.get('test_zeit',0)) or None,'durchfuehrung':'Nicht angegeben'}
+
+def run_reference_text(test):
+    seconds=f"{test['zeit_s']:g}".replace('.',',')
+    mode='' if test['durchfuehrung']=='Nicht angegeben' else ' · '+test['durchfuehrung']
+    return f"Gemessener Lauftest: {test['distanz_m']} m in {seconds} s{mode}."
+
+def save_run_reference(record,distance,seconds,mode,unit=None):
+    test={'distanz_m':distance,'zeit_s':seconds,'durchfuehrung':mode}
+    validate_run_reference(test)
+    updated=deepcopy(record)
+    updated['lauftest']=test
+    if unit is not None:
+        cycle,te,focus=unit
+        saved=updated.get('einheitenprotokoll',{}).get(focus_unit_key(updated,cycle,te,focus))
+        if saved:
+            # Only the selected plan's unambiguous automatic test line is corrected.
+            # Other units, trainer text, performed values and the original stay intact.
+            old=rf'Testauswertung \(keine Laufvorgabe\): {distance} m: \d+(?:[.,]\d+)? s bei \d+(?:[.,]\d+)?% der gemessenen Testgeschwindigkeit'
+            current=rf'Gemessener Lauftest: {distance} m in \d+(?:[.,]\d+)? s(?: · (?:Einzellauf|Gruppenlauf))?\.'
+            plan=re.sub(rf'(?m)^(?:{old}|{current})$',lambda match:run_reference_text(test),saved['plan'])
+            if plan!=saved['plan']:
+                updated=save_unit_record(updated,cycle,te,plan,'Lauftest-Korrektur',focus=focus)
+    return updated
+
+def render_run_reference_editor(record,sport,name,unit=None):
+    focus=unit[2] if unit else legacy_focus(record)
+    key=lambda field:widget_key(field,sport,'lauftest_'+focus,name)
+    guest=st.session_state.auth_modus=='gast'
+    test=run_reference(record,focus)
+    if test['zeit_s']:
+        st.caption(run_reference_text(test))
+    if st.button('Lauftest eintragen oder korrigieren',key=key('open_button'),disabled=guest):
+        st.session_state[key('open')]=not st.session_state.get(key('open'),False)
+    if not st.session_state.get(key('open')) or guest:
+        return
+    a,b,c=st.columns(3)
+    errors=[]
+    distance=voice_number_input('Laufteststrecke (m)',50,1500,test['distanz_m'],key=key('distance'),container=a,validation_errors=errors)
+    seconds=voice_number_input('Gemessene Laufzeit (Sekunden)',0.01,900.,test['zeit_s'],key=key('seconds'),container=b,validation_errors=errors)
+    mode=c.selectbox('Durchführung des Lauftests',RUN_MODES,index=RUN_MODES.index(test['durchfuehrung']),key=key('mode'))
+    st.caption('Gemessene Zeit eingeben, z. B. 48,4. Die Laufreferenz gilt für beide Trainingsbereiche.')
+    if unit:
+        st.caption('Im angezeigten gespeicherten Plan wird eine passende automatisch erzeugte Testzeile ebenfalls korrigiert; die vorherige Fassung bleibt im Verlauf.')
+    if st.button('Lauftest speichern',key=key('save'),disabled=bool(errors)):
+        try:
+            updated=save_run_reference(record,distance,seconds,mode,unit)
+            persist_record(sport,name,updated,'Lauftest gespeichert: '+run_reference_text(updated['lauftest']))
+        except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
 
 def current_assignment(record):
     gender=record.get('geschlecht','Weiblich' if record['profil'].endswith('_w') else 'Männlich')
@@ -2155,7 +2232,7 @@ def select_person(page, allow_new=False):
     sport,name=json.loads(selected)
     return sport,name,st.session_state.kader_db[sport][name]
 
-def render_athlete_editor(selection=None):
+def render_athlete_editor(selection=None,unit=None):
     inline=selection is not None
     if not inline:
         st.header('Athletenprofil · anlegen und bearbeiten')
@@ -2223,6 +2300,7 @@ def render_athlete_editor(selection=None):
             persist_record(sport,name,updated,'Athletenprofil gespeichert.')
         except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     if old:
+        render_run_reference_editor(old,sport,old_name,unit)
         with st.expander('Gespeicherte Messungen und Profilverlauf'):
             render_field_history(old)
             if old.get('sprungtests'):st.dataframe(pd.DataFrame([jump_summary(t) for t in old['sprungtests']]),hide_index=True)
@@ -2333,7 +2411,7 @@ def render_training():
     with unit_column:
         te=st.selectbox('Trainingseinheit (TE)',options,format_func=lambda n:f'TE {n}',key='training_te')
     with st.container(border=True):
-        render_athlete_editor(selection)
+        render_athlete_editor(selection,(cycle,te,focus))
     saved=record.get('einheitenprotokoll',{}).get(focus_unit_key(record,cycle,te,focus))
     key=lambda field:widget_key(field,sport,focus+'_'+cycle+'_'+str(te),name)
     st.caption(f"{cycle} · {record['kalenderklasse']} → Trainingsplan {record['profil'].split('_')[1]} · {record['fasertyp']}")
@@ -2446,7 +2524,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     hurdle_config=hurdle_defaults(); m_config=m_training_defaults('Fussball',band); org_config={}
     # Previously documented exercise starts remain references, not extra setup questions.
     cheer_start=int(saved.get('cheer_start',0)); single_start=int(saved.get('single_start',0)); bilateral_start=int(saved.get('beid_start',0))
-    test_distance=int(saved.get('test_distanz',800)); test_seconds=float(saved.get('test_zeit',0)); test_percent=80
+    test=run_reference(record,focus)
     calendar=record.get('kalenderklasse',calendar_band(record['alter']))
     assignment_text=f"Altersklasse {calendar} → Trainingsplan {band}"
     if record.get('trainingszuordnung',{}).get('veto_klasse'):
@@ -2663,8 +2741,8 @@ def generate_unit(record, focus, te, name="Athlet"):
         if hurdle_m or any(row["Block"] == "M-Sprint ohne Ball" for row in m_rows):
             tl_text = "M-Sprints gemäß eigenem Block; keine zusätzlichen geraden Beschleunigungen"
         day_label = FOCUS_LABELS[focus] + " · " + ("kürzere zweite Einheit" if short_day else "Schwerpunkteinheit")
-    test_note = (f"Testauswertung (keine Laufvorgabe): {test_distance} m: {test_seconds / (test_percent / 100):.1f} s bei {test_percent}% der gemessenen Testgeschwindigkeit"
-                 if test_seconds > 0 else "Tempolauf-Zielzeiten richten sich nach vorhandenen Tests derselben Distanz")
+    test_note = (run_reference_text(test) if test['zeit_s']
+                 else "Tempolauf-Zielzeiten richten sich nach vorhandenen Tests derselben Distanz")
     phase_label = "Phase 1: Komplextraining: Kraft und anschließende Sprünge/Sprints" if woche <= 7 else "Phase 2: Laktazide Vorab-Ermüdung" if woche <= 11 else "Phase 3: Marathon & Zuspitzung"
     if short_day:
         phase_label = "Neuromuskulärer Erinnerungsreiz"

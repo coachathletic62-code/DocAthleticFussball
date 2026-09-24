@@ -27,14 +27,50 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
-st.set_page_config(page_title="Doc Athletic – Fußball · 120", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Doc Athletic – Fußball · 120", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>
-.stApp {background:#0b0c10;color:#f5f5f5}
-[data-testid="stSidebar"] {background:#17191c}
-h1,h2,h3,p,label {color:inherit}
-[data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea {background:white;color:#111}
+.stApp {background:#0b0c10;color:#f5f5f5;color-scheme:dark}
+[data-testid="stHeader"] {background:#0b0c10;color:#f5f5f5}
+[data-testid="stHeader"] button,[data-testid="stHeader"] svg {color:#f5f5f5 !important}
+[data-testid="stMainBlockContainer"] {padding-top:4rem;padding-bottom:2rem}
+h1,h2,h3,h4,h5,h6,p,label {color:#f5f5f5 !important}
+h1 {font-size:clamp(1.5rem,3vw,2.1rem) !important}
+h2 {font-size:1.4rem !important;color:#66fcf1 !important}
+[data-testid="stCaptionContainer"] p {color:#c5c6c7 !important}
+[data-testid="stWidgetLabel"] p,[data-testid="stRadio"] label p {color:#f5f5f5 !important}
+[data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,[data-testid="stDateInput"] input,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background:#fff !important;color:#111 !important;-webkit-text-fill-color:#111 !important;
+    caret-color:#111 !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] span,
+[data-testid="stSelectbox"] [data-baseweb="select"] input,
+[data-baseweb="popover"] [role="option"],
+[data-baseweb="popover"] [role="option"] * {color:#111 !important;-webkit-text-fill-color:#111 !important}
+[data-baseweb="popover"] [role="listbox"] {background:#fff !important}
+[data-testid="stTextInput"] input:disabled,[data-testid="stTextArea"] textarea:disabled {
+    background:#dce2e7 !important;opacity:1;
+}
+[data-testid="stButton"] button,[data-testid="stFormSubmitButton"] button {
+    background:#1f2833 !important;border:2px solid #45a29e !important;border-radius:8px;width:100%;
+}
+[data-testid="stButton"] button *,[data-testid="stFormSubmitButton"] button * {color:#f5f5f5 !important}
+[data-testid="stButton"] button:focus-visible,[data-testid="stFormSubmitButton"] button:focus-visible {
+    outline:3px solid #66fcf1 !important;
+}
+[data-testid="stDownloadButton"] button {background:#66fcf1 !important;border:2px solid #45a29e !important;width:100%}
+[data-testid="stDownloadButton"] button * {color:#111 !important;font-weight:700}
+[data-testid="stRadio"] label {background:#1f2833;border:1px solid #45a29e;border-radius:8px;padding:8px 14px}
+[data-testid="stExpander"] details > summary {background:#17191c !important;color:#fff !important}
+[data-testid="stExpander"] details > summary * {color:#fff !important}
+[data-testid="stVerticalBlockBorderWrapper"] > div {border-color:#45a29e !important}
 table {border-collapse:collapse} td,th {padding:6px;border:1px solid #aaa}
-@media print {[data-testid="stSidebar"],.stButton,.stDownloadButton {display:none}}
+@media print {
+    [data-testid="stSidebar"],.stButton,.stDownloadButton {display:none}
+    .druck-block {background:#fff !important;color:#111 !important;border:0 !important}
+    .druck-block h3,.druck-block p,.druck-block span {color:#111 !important}
+}
 </style>""",unsafe_allow_html=True)
 def lade_bild(dateinamen_liste, use_col=False):
     for name in dateinamen_liste:
@@ -70,7 +106,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = "24.09.2026 · vereinfachter Ablauf · Standardplan und Trainer-Veto"
+BUILD_STAND = '24.09.2026, 12:04 Uhr deutscher Zeit · zentrale Athleten- und Trainingsübersicht · Standardplan und Trainer-Veto'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -2105,21 +2141,25 @@ def select_person(page, allow_new=False):
     sport,name=json.loads(selected)
     return sport,name,st.session_state.kader_db[sport][name]
 
-def render_athlete_editor():
-    st.header('Athleten · einmal erfassen und später bei Bedarf ändern')
-    sport,old_name,old=select_person('editor',True)
+def render_athlete_editor(selection=None):
+    inline=selection is not None
+    if not inline:
+        st.header('Athletenprofil · anlegen und bearbeiten')
+        selection=select_person('editor',True)
+    sport,old_name,old=selection
     record=old or {'alter':None,'gewicht':None,'groesse':None,'t_60':None,'fasertyp':'Schnelligkeit (Sprint)',
                   'reife':'Normalentwickler','geschlecht':'Männlich','sbe':'SR 2'}
     guest=st.session_state.auth_modus=='gast'
     key=lambda f:widget_key(f,sport,'editor',old_name or '__new__')
-    name=st.text_input('Name',old_name or '',key=key('name'),disabled=guest or old is not None).strip()
-    left,right=st.columns(2)
-    with left:
+    name=old_name if inline and old else st.text_input('Name',old_name or '',key=key('name'),disabled=guest or old is not None).strip()
+    personal,measurements,development_column,references=st.columns(4)
+    with personal:
         age=voice_number_input('Alter (Jahre)',9,40,record['alter'],key=key('age'),disabled=guest)
         gender=st.selectbox('Geschlecht',['Männlich','Weiblich'],index=int(record.get('geschlecht','Weiblich' if record.get('profil','').endswith('_w') else 'Männlich')=='Weiblich'),key=key('gender'),disabled=guest)
-        weight=voice_number_input('Körpergewicht (kg)',30.,140.,record['gewicht'],key=key('weight'),disabled=guest)
+    with measurements:
         height=voice_number_input('Körpergröße (m)',1.3,2.15,record['groesse'],key=key('height'),disabled=guest)
-    with right:
+        weight=voice_number_input('Körpergewicht (kg)',30.,140.,record['gewicht'],key=key('weight'),disabled=guest)
+    with development_column:
         kinds=['Ausdauer','Kraft','Sprungkraft','Gazelle','Schnelligkeit (Sprint)']
         kind=st.selectbox('Athletentyp',kinds,index=kinds.index(record['fasertyp']),key=key('type'),disabled=guest)
         calendar=(record.get('kalenderklasse',calendar_band(age)) if old and age==old['alter'] else calendar_band(age)) if age is not None else None
@@ -2129,6 +2169,7 @@ def render_athlete_editor():
             development=st.selectbox('Entwicklungsstatus',options,index=options.index(development),key=key('development'),disabled=guest)
         elif calendar=='U11':
             st.caption('U11: regulärer Plan ohne entwicklungsabhängige Verschiebung.')
+    with references:
         frequency=st.selectbox('Einheiten pro Woche',[1,2],index=int(record.get('planung',{}).get('einheiten',1))-1,key=key('frequency'),disabled=guest)
         t60=voice_number_input('60m-Referenz (s; falls vorhanden)',6.,15.,record.get('t_60'),key=key('t60'),disabled=guest)
     notes=st.text_input('Profilnotiz (optional)',record.get('notizen',''),max_chars=4000,key=key('notes'),disabled=guest)
@@ -2136,18 +2177,20 @@ def render_athlete_editor():
     same=old and calendar==record.get('kalenderklasse',calendar_band(old['alter'])) and development==record['reife'] and gender==record.get('geschlecht',gender)
     veto=cfg.get('veto_klasse') if same else None
     veto_note=cfg.get('veto_notiz','') if veto else ''
+    st.caption('Profiländerungen mit „Athletenprofil speichern“ übernehmen. Die Trainingsmatrix verwendet den gespeicherten Stand.')
+    veto_action,save_action=st.columns(2)
     if calendar:
         assignment=training_assignment(calendar,development,veto)
         st.caption(f"Altersklasse {calendar} → Trainingsplan {assignment['effective']}"+(' · Trainer-Veto' if veto else ''))
         opened=key('veto_open')+'_'+calendar+'_'+development+'_'+gender
-        if st.button('Trainer-Veto zur Trainingsklasse',disabled=guest,key=key('veto_button')):
+        if veto_action.button('Trainer-Veto zur Trainingsklasse',disabled=guest,key=key('veto_button')):
             st.session_state[opened]=not st.session_state.get(opened,False)
         if st.session_state.get(opened):
             options=['Automatisch']+list(AGE_BANDS)
             choice=st.selectbox('Trainingsklasse nach Trainer-Veto',options,index=options.index(veto or 'Automatisch'),key=opened+'_class')
             veto=None if choice=='Automatisch' else choice
             veto_note=st.text_input('Trainer-Notiz zur Zuordnung (optional)',veto_note,max_chars=4000,key=opened+'_note') if veto else ''
-    if st.button('Athletenprofil speichern',type='primary',disabled=guest):
+    if save_action.button('Athletenprofil speichern',type='primary',disabled=guest):
         try:
             if not name or age is None or weight is None or height is None:
                 raise ValueError('Name, Alter, Körpergewicht und Körpergröße bitte eintragen.')
@@ -2206,8 +2249,10 @@ def export_plan(plan):
     return '<!doctype html><html lang="de"><meta charset="utf-8"><title>Doc Athletic Trainingsplan</title><style>body{font-family:Arial}pre{white-space:pre-wrap}@media print{@page{size:A4 landscape}}</style><h1>Doc Athletic Train Smart Evolution</h1><pre>'+escape(plan)+'</pre></html>'
 
 def render_training():
-    st.header('Training')
-    selection=select_person('training')
+    st.header('Athletenprofil & Trainingsschwerpunkt')
+    person_column,focus_column,unit_column=st.columns([1.25,2,0.8])
+    with person_column:
+        selection=select_person('training')
     if selection is None:
         st.info('Zuerst einen Athleten anlegen oder unter Tests / Import eine Liste einlesen.')
         render_athlete_editor()
@@ -2215,7 +2260,8 @@ def render_training():
     sport,name,stored=selection
     record,assignment,_=current_assignment(stored)
     guest=st.session_state.auth_modus=='gast'
-    focus=st.radio('Trainingsbereich',list(FOCUS_LABELS),format_func=FOCUS_LABELS.get,horizontal=True,key='training_focus')
+    with focus_column:
+        focus=st.radio('Trainingsbereich',list(FOCUS_LABELS),format_func=FOCUS_LABELS.get,horizontal=True,key='training_focus')
     cycle=record.get('aktiver_makrozyklus','Bestand')
     cfg=phase_defaults();cfg.update(record.get('phasensteuerung',{}))
     band=record['profil'].split('_')[1]
@@ -2223,12 +2269,15 @@ def render_training():
     archived_units={item['te'] for item in record.get('einheitenprotokoll',{}).values()
                     if item.get('cycle')==cycle and item.get('schwerpunkt',legacy_focus(record))==focus}
     options=sorted(set(range(1,total+1))|archived_units)
-    te=st.selectbox('Trainingseinheit (TE)',options,format_func=lambda n:f'TE {n}',key='training_te')
+    with unit_column:
+        te=st.selectbox('Trainingseinheit (TE)',options,format_func=lambda n:f'TE {n}',key='training_te')
+    with st.container(border=True):
+        render_athlete_editor(selection)
     saved=record.get('einheitenprotokoll',{}).get(focus_unit_key(record,cycle,te,focus))
     key=lambda field:widget_key(field,sport,focus+'_'+cycle+'_'+str(te),name)
     st.caption(f"{cycle} · {record['kalenderklasse']} → Trainingsplan {record['profil'].split('_')[1]} · {record['fasertyp']}")
     if assignment['blocked'] and not saved:
-        st.info('Für diese Zuordnung fehlt eine benachbarte Planvorlage. Unter Athleten eine Trainer-Zuordnung festlegen.')
+        st.info('Für diese Zuordnung fehlt eine benachbarte Planvorlage. Oben über das Trainer-Veto eine Trainingsklasse festlegen.')
         return
     planned,effective=phase_status(cfg,band,te)
     if planned!=effective and effective!='Zyklus abgeschlossen' and not guest and not saved and not (band=='U15' and effective=='Jumps'):
@@ -2703,7 +2752,7 @@ if not TRAINER_CODE:
 if DATABASE_URL:
     st.caption("Speicher: externe PostgreSQL-Datenbank")
 else:
-    st.warning("Speicher: lokale App-Datei. Auf Streamlit Cloud nicht dauerhaft garantiert. Nach der Arbeit unter Datensicherung ein Backup herunterladen; externe Datenbank noch einrichten.")
+    st.warning("Speicher lokal, nicht dauerhaft garantiert: Nach der Arbeit unter Datensicherung ein Backup herunterladen. Externe Datenbank noch einrichten.")
 if 'auth_modus' not in st.session_state:
     st.session_state.auth_modus = None
 if st.session_state.auth_modus is None:
@@ -2742,10 +2791,13 @@ def navigiere(ziel):
     st.session_state.navigations_status = ziel
 
 # APP_ROUTING
-for label,target in [('Training','Operativ'),('Athleten','Athleten'),('Tests / Import','Testtabelle'),('Datensicherung','Backup')]:
-    if st.session_state.auth_modus=='gast' and target in ('Testtabelle','Backup'):continue
-    st.sidebar.button(label,on_click=navigiere,args=(target,),key='nav_'+target)
-if st.sidebar.button('ABMELDEN'):
+navigation=[('Training','Operativ'),('Athleten','Athleten'),('Tests / Import','Testtabelle'),('Datensicherung','Backup')]
+if st.session_state.auth_modus=='gast':
+    navigation=[item for item in navigation if item[1] not in ('Testtabelle','Backup')]
+nav_columns=st.columns(len(navigation)+1)
+for column,(label,target) in zip(nav_columns,navigation):
+    column.button(label,on_click=navigiere,args=(target,),key='nav_'+target)
+if nav_columns[-1].button('ABMELDEN'):
     st.session_state.clear();st.rerun()
 page=st.session_state.navigations_status
 if page=='Athleten':render_athlete_editor()

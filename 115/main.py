@@ -27,8 +27,21 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
+SAVED_PLAN_STYLE = """
+.doc-saved-plan {background:#111;color:#f5f5f5;border:2px solid #45a29e;border-radius:8px;padding:20px;line-height:1.5}
+.doc-saved-plan p,.doc-saved-plan h3 {color:#f5f5f5 !important}
+.doc-saved-plan p {white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 .5rem}
+.doc-saved-plan h3 {margin:0 0 1rem;color:#66fcf1 !important}
+.doc-saved-plan .plan-table {overflow-x:auto;margin:1rem 0}
+.doc-saved-plan table {width:100%;border-collapse:collapse;font-size:.9rem}
+.doc-saved-plan th,.doc-saved-plan td {padding:8px;border:1px solid #aaa;text-align:left;vertical-align:top;white-space:pre-wrap}
+.doc-saved-plan th {background:#1f4e78;color:#fff !important}
+.doc-saved-plan td {background:#f2f5f7;color:#111 !important}
+.doc-saved-plan tr:nth-child(even) td {background:#fff}
+@media print {.doc-saved-plan {background:#fff;color:#111;border:0;padding:0}.doc-saved-plan p,.doc-saved-plan h3 {color:#111 !important}}
+"""
 st.set_page_config(page_title="Doc Athletic – Fußball · 120", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("""<style>
+st.markdown("<style>"+SAVED_PLAN_STYLE+"""
 .stApp {background:#0b0c10;color:#f5f5f5;color-scheme:dark}
 [data-testid="stHeader"] {background:#0b0c10;color:#f5f5f5}
 [data-testid="stHeader"] button,[data-testid="stHeader"] svg {color:#f5f5f5 !important}
@@ -38,6 +51,7 @@ h1 {font-size:clamp(1.5rem,3vw,2.1rem) !important}
 h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stCaptionContainer"] p {color:#c5c6c7 !important}
 [data-testid="stWidgetLabel"] p,[data-testid="stRadio"] label p {color:#f5f5f5 !important}
+[data-testid="stText"],[data-testid="stText"] * {color:#f5f5f5 !important}
 [data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,
 [data-testid="stTextArea"] textarea,[data-testid="stDateInput"] input,
 [data-testid="stSelectbox"] [data-baseweb="select"] > div {
@@ -106,7 +120,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '24.09.2026, 12:04 Uhr deutscher Zeit · zentrale Athleten- und Trainingsübersicht · Standardplan und Trainer-Veto'
+BUILD_STAND = '24.09.2026, 13:03 Uhr deutscher Zeit · zentrale Übersicht · lesbare gespeicherte Trainingspläne'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -2245,8 +2259,49 @@ def render_cycle_controls(record,sport,name,key):
             try:persist_record(sport,name,change_cycle(record,chosen,True),'Makrozyklus geöffnet.')
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
 
+def saved_plan_html(plan):
+    """Gespeicherten Wortlaut darstellen; keine Trainingswerte neu berechnen."""
+    headers=[['Block / Phase','Trainingsmittel / Übung','Sätze','Wdh. / Distanz',
+              'Hardware / Zusatzlast','Intensität','Pause'],
+             ['Abschnitt','Soll','Ist','Abweichung']]
+    lines=plan.splitlines()
+    def cells(line):
+        stripped=line.strip()
+        return [part.strip() for part in stripped[:-1].split('|')] if stripped.endswith('|') else None
+    rendered=[]; index=0
+    while index<len(lines):
+        header=None; consumed=0
+        for candidate in headers:
+            if cells(lines[index])==candidate:
+                header,consumed=candidate,1
+                break
+            if [cells(line) for line in lines[index:index+len(candidate)]]==[[label] for label in candidate]:
+                header,consumed=candidate,len(candidate)
+                break
+        if header:
+            rows=[]; end=index+consumed
+            while end<len(lines):
+                row=cells(lines[end])
+                if row is None or len(row)!=len(header):
+                    break
+                rows.append(row); end+=1
+            if rows:
+                rendered.append('<div class="plan-table"><table><thead><tr>'+''.join(
+                    '<th scope="col">'+escape(label)+'</th>' for label in header)+'</tr></thead><tbody>'+''.join(
+                    '<tr>'+''.join('<td>'+escape(value)+'</td>' for value in row)+'</tr>' for row in rows
+                    )+'</tbody></table></div>')
+                index=end
+                continue
+        # Unklare Tabellenzeilen und freie Trainertexte bleiben wortgetreu lesbar.
+        tag='h3' if lines[index].startswith('TRAININGSMATRIX - EINHEIT:') else 'p'
+        rendered.append('<'+tag+'>'+escape(lines[index])+'</'+tag+'>')
+        index+=1
+    return '<section class="doc-saved-plan" data-saved-plan="true">'+''.join(rendered)+'</section>'
+
 def export_plan(plan):
-    return '<!doctype html><html lang="de"><meta charset="utf-8"><title>Doc Athletic Trainingsplan</title><style>body{font-family:Arial}pre{white-space:pre-wrap}@media print{@page{size:A4 landscape}}</style><h1>Doc Athletic Train Smart Evolution</h1><pre>'+escape(plan)+'</pre></html>'
+    return ('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Doc Athletic Trainingsplan</title>'
+            '<style>body{font-family:Arial}@media print{@page{size:A4 landscape}}'+SAVED_PLAN_STYLE+'</style></head>'
+            '<body><h1>Doc Athletic Train Smart Evolution</h1>'+saved_plan_html(plan)+'</body></html>')
 
 def render_training():
     st.header('Athletenprofil & Trainingsschwerpunkt')
@@ -2294,7 +2349,7 @@ def render_training():
     current=saved['plan'] if saved else standard_text
     if saved:st.caption('Gespeicherter Sollplan · bleibt bei späteren Profiländerungen erhalten.')
     if current==standard_text:st.markdown(generated,unsafe_allow_html=True)
-    else:st.text(current)
+    else:st.markdown(saved_plan_html(current),unsafe_allow_html=True)
     st.caption('Trainerverantwortung: Die individuelle Durchführung kann über das Veto angepasst werden.')
     if not guest:
         if not saved and st.button('Einheit speichern',type='primary',key=key('save')):
@@ -2337,7 +2392,7 @@ def render_training():
         if st.session_state.get(key('cycle_open')):render_cycle_controls(record,sport,name,key)
     if saved and saved.get('revisions'):
         with st.expander('Frühere Fassungen dieser Einheit'):
-            for item in reversed(saved['revisions']):st.text(item['plan'])
+            for item in reversed(saved['revisions']):st.markdown(saved_plan_html(item['plan']),unsafe_allow_html=True)
     if st.button('Tempotabelle 50–800 m ansehen',key=key('tempo_button')):
         st.session_state[key('tempo_open')]=not st.session_state.get(key('tempo_open'),False)
     if st.session_state.get(key('tempo_open')):

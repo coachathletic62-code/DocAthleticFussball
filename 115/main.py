@@ -50,6 +50,12 @@ h1,h2,h3,h4,h5,h6,p,label {color:#f5f5f5 !important}
 h1 {font-size:clamp(1.5rem,3vw,2.1rem) !important}
 h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stCaptionContainer"] p {color:#c5c6c7 !important}
+[data-testid="stTooltipContent"],[data-testid="stTooltipErrorContent"] {
+    background:#fff !important;color:#111 !important;border:1px solid #767676;
+}
+[data-testid="stTooltipContent"] *,[data-testid="stTooltipErrorContent"] * {
+    color:#111 !important;-webkit-text-fill-color:#111 !important;
+}
 [data-testid="stWidgetLabel"] p,[data-testid="stRadio"] label p {color:#f5f5f5 !important}
 [data-testid="stText"],[data-testid="stText"] * {color:#f5f5f5 !important}
 [data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,
@@ -120,7 +126,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '24.09.2026, 14:08 Uhr deutscher Zeit · Lauftest manuell eintragen und korrigieren'
+BUILD_STAND = '24.09.2026, 14:22 Uhr deutscher Zeit · lesbare Hinweise und klare Profilzuordnung beim Tabellenimport'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -1447,9 +1453,15 @@ def render_roster_import():
     epoch = st.session_state.get('roster_epoch',0)
     key = f'roster_grid_{epoch}'
     columns = {label:st.column_config.TextColumn(label,width='small' if label not in ('Name','Notiz','Entwicklungsstand') else 'medium') for label in ROSTER_LABELS}
-    columns['Zuordnung'] = st.column_config.SelectboxColumn('Zuordnung',options=[ROSTER_NEW,*identities],width='medium')
+    profile_labels={ROSTER_NEW:'Neu anlegen',**{identity:'Vorhanden: '+identity for identity in identities}}
+    columns['Zuordnung'] = st.column_config.SelectboxColumn('Profil in der App',options=[ROSTER_NEW,*identities],
+        format_func=profile_labels.get,width=300,
+        help='Neu anlegen: ein neues Athletenprofil speichern. Vorhanden: die Tabellenwerte dieser bereits gespeicherten Person zuordnen.')
     columns['Shuttle-Angabe'] = st.column_config.SelectboxColumn('Shuttle-Angabe',options=['',*FIELD_SHUTTLE_MODES])
-    st.caption('Eindeutig vorhandene Namen werden zugeordnet. Bei anderer Schreibweise bitte die richtige Person auswählen, um Doppelprofile zu vermeiden. Leere Angaben ändern vorhandene Stammdaten nicht.')
+    st.markdown('Die zweite Spalte **„Profil in der App“** ergänzt die hochgeladene Tabelle. '
+                '**„Neu anlegen“** = ein neues Athletenprofil anlegen. **„Vorhanden: Name“** = das bestehende Profil ergänzen.')
+    st.caption('Ist eine Person bereits unter anderer Schreibweise gespeichert, wähle hier ihr vorhandenes Profil. '
+               'Erst „Kader und Tests prüfen“ anklicken; übernommen wird erst beim anschließenden Speichern. Leere Angaben ändern vorhandene Stammdaten nicht.')
     edited = st.data_editor(pd.DataFrame(draft).fillna('').astype(str),hide_index=True,width='stretch',height=450,row_height=42,
         column_order=shared+sections[view],column_config=columns,num_rows='fixed',key=key,on_change=roster_sync_grid,args=(key,))
     rows = edited.to_dict('records')

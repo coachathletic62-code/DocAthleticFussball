@@ -56,6 +56,8 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stTooltipContent"] *,[data-testid="stTooltipErrorContent"] * {
     color:#111 !important;-webkit-text-fill-color:#111 !important;
 }
+[data-testid="stAlertContainer"] {background:#f1f5f9 !important;color:#111 !important;}
+[data-testid="stAlertContainer"] * {color:#111 !important;-webkit-text-fill-color:#111 !important;}
 [data-testid="stWidgetLabel"] p,[data-testid="stRadio"] label p {color:#f5f5f5 !important}
 [data-testid="stText"],[data-testid="stText"] * {color:#f5f5f5 !important}
 [data-testid="stTextInput"] input,[data-testid="stNumberInput"] input,
@@ -88,6 +90,7 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 table {border-collapse:collapse} td,th {padding:6px;border:1px solid #aaa}
 @media print {
     [data-testid="stSidebar"],.stButton,.stDownloadButton {display:none}
+    .st-key-trainer_instructions {display:none !important}
     .druck-block {background:#fff !important;color:#111 !important;border:0 !important}
     .druck-block h3,.druck-block p,.druck-block span {color:#111 !important}
 }
@@ -126,7 +129,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '24.09.2026, 14:22 Uhr deutscher Zeit · lesbare Hinweise und klare Profilzuordnung beim Tabellenimport'
+BUILD_STAND = '24.09.2026, 16:44 Uhr deutscher Zeit · wirksame Trainingsklasse und separate Traineranweisung'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -1319,9 +1322,15 @@ def prepare_roster_batch(kader, rows, datum, bogen, focus, team='', correct=Fals
                     rec['t_150_quelle'] = 'berechnet'
             diffs = []
             if old:
-                for key in ('alter','gewicht','groesse','geschlecht','fasertyp','reife','kalenderklasse','profil','trainingsschwerpunkt','team','t_60'):
+                labels = {'alter':'Alter','gewicht':'Gewicht (kg)','groesse':'Körpergröße (m)','geschlecht':'Geschlecht',
+                    'fasertyp':'Athletentyp','reife':'Entwicklungsstatus','kalenderklasse':'Altersklasse','profil':'Trainingsprofil',
+                    'trainingsschwerpunkt':'Trainingsbereich','team':'Team / Trainingsgruppe','t_60':'60-m-Referenz (s)'}
+                for key, label in labels.items():
                     if rec.get(key) != old.get(key):
-                        diffs.append(f'{key}: {old.get(key, "leer")} → {rec.get(key, "leer")}')
+                        before, after = old.get(key), rec.get(key)
+                        if key == 'trainingsschwerpunkt':
+                            before, after = FOCUS_LABELS.get(before,before), FOCUS_LABELS.get(after,after)
+                        diffs.append(f'{label}: {before if before is not None else "leer"} → {after if after is not None else "leer"}')
                 previous_frequency = focus_settings(old,focus).get('planung',{}).get('einheiten',1)
                 if frequency is not None and frequency != previous_frequency:
                     diffs.append(f'TE/Woche: {previous_frequency} → {frequency}')
@@ -1403,26 +1412,34 @@ def roster_sync_grid(key):
     st.session_state.roster_draft = draft
 def render_roster_import():
     st.button('Zur Trainingsplanung', on_click=navigiere, args=('Operativ',))
-    st.caption('Stammdaten und Testergebnisse gemeinsam aus Excel, LibreOffice oder CSV übernehmen. Erst laden, kontrollieren, dann gemeinsam speichern. Ein PDF oder Foto ist hier kein Tabellenimport.')
+    st.markdown('**Datei auswählen → Vorschau kontrollieren → In den Kader übernehmen.**')
     identities = field_identity_map(st.session_state.kader_db)
     draft = st.session_state.get('roster_draft')
-    with st.expander('Tabelle laden', expanded=draft is None):
+    with st.expander('1. Datei auswählen', expanded=draft is None):
         upload = st.file_uploader('Ausgefüllte Stammdaten- und Testtabelle',type=['xlsx','ods','csv'],key='roster_upload')
-        allow_replace = st.checkbox('Bisherigen Tabellenentwurf ersetzen',key='roster_replace') if draft else True
-        if st.button('Stammdaten-Tabelle laden',disabled=upload is None or not allow_replace):
+        signature = hashlib.sha256(upload.name.encode()+upload.getvalue()).hexdigest() if upload is not None else None
+        if upload is None:
+            st.session_state.pop('roster_file_signature',None)
+        elif signature != st.session_state.get('roster_file_signature'):
             try:
                 rows, metadata = read_roster_file(upload.getvalue(),upload.name,identities)
                 st.session_state.roster_draft = rows
                 st.session_state.roster_pending = metadata
+                st.session_state.roster_file_signature = signature
+                st.session_state.roster_correct = False
                 st.session_state.roster_epoch = st.session_state.get('roster_epoch',0)+1
                 st.session_state.pop('roster_preview',None)
+                st.session_state.pop('roster_receipt',None)
                 st.rerun()
             except Exception as exc:
-                st.error(f'Datei nicht geladen: {exc}')
-        if st.button('Leere Erfassung für 30 Personen öffnen',disabled=not allow_replace):
+                st.error(f'Datei nicht eingelesen; nichts übernommen: {exc}')
+                return
+        if st.button('Leere Erfassung für 30 Personen öffnen'):
             st.session_state.roster_draft = [{**{label:'' for label in ROSTER_LABELS},'Zuordnung':ROSTER_NEW} for _ in range(30)]
             st.session_state.roster_epoch = st.session_state.get('roster_epoch',0)+1
+            st.session_state.roster_correct = False
             st.session_state.pop('roster_preview',None)
+            st.session_state.pop('roster_receipt',None)
             st.rerun()
     pending = st.session_state.pop('roster_pending',None)
     if pending:
@@ -1435,17 +1452,26 @@ def render_roster_import():
     for key, value in st.session_state.get('roster_metadata',{}).items():
         if key not in st.session_state:
             st.session_state[key] = value
-    a,b = st.columns(2)
-    datum = a.date_input('Testdatum der Tabelle',key='roster_date')
-    team = b.text_input('Team / Trainingsgruppe',max_chars=120,key='roster_team')
-    title = st.text_input('Bezeichnung des Testtermins',value='Leistungsanalyse',max_chars=120,key='roster_title')
-    focus = st.selectbox('Schwerpunkt für die importierten Personen',list(FOCUS_LABELS),index=1,format_func=FOCUS_LABELS.get,key='roster_focus')
-    mode = st.selectbox('Shuttlezeiten ohne Kennzeichnung übernehmen als',FIELD_SHUTTLE_MODES,index=2,key='roster_mode')
-    st.caption('1 Shuttle = hin UND zurück. Gesamtstrecke = einfache Strecke × 2 × Shuttle-Anzahl + Wendezuschlag für den gesamten Test. Ü23 wird der vorhandenen Trainingsklasse Master zugeordnet.')
-    st.session_state.roster_metadata = {k:st.session_state[k] for k in ('roster_date','roster_team','roster_title','roster_focus','roster_mode')}
     draft = st.session_state.get('roster_draft')
     if draft is None:
+        st.info('Wähle oben deine ausgefüllte Tabelle aus. Danach erscheint die Vorschau mit der Schaltfläche zum Übernehmen.')
         return
+    st.subheader('2. Vorschau prüfen und in den Kader übernehmen')
+    status_area = st.empty()
+    correct = st.checkbox('Abweichende vorhandene Stammdaten und Testwerte übernehmen',key='roster_correct',
+        help='Nur auswählen, wenn die Werte der Tabelle vorhandene abweichende Angaben ersetzen sollen.') if any(r.get('Zuordnung') in identities for r in draft) else False
+    action_area = st.empty()
+    with st.expander('Testdatum und Übernahmeoptionen'):
+        a,b = st.columns(2)
+        datum = a.date_input('Testdatum der Tabelle',key='roster_date')
+        team = b.text_input('Team / Trainingsgruppe',max_chars=120,key='roster_team')
+        title = st.text_input('Bezeichnung des Testtermins',value='Leistungsanalyse',max_chars=120,key='roster_title')
+        focus = st.selectbox('Schwerpunkt für die importierten Personen',list(FOCUS_LABELS),index=1,format_func=FOCUS_LABELS.get,key='roster_focus')
+        mode = st.selectbox('Shuttlezeiten ohne Kennzeichnung übernehmen als',FIELD_SHUTTLE_MODES,index=2,key='roster_mode')
+        use_reference = st.checkbox('Vorhandene 60-m-Testzeiten als Trainingsreferenz übernehmen',value=True,key='roster_reference')
+        st.caption('1 Shuttle = hin UND zurück. Gesamtstrecke = einfache Strecke × 2 × Shuttle-Anzahl + Wendezuschlag für den gesamten Test. Ü23 wird der vorhandenen Trainingsklasse Master zugeordnet.')
+    st.caption(f"Testdatum: {datum:%d.%m.%Y} · {team or 'ohne Teamangabe'} · {FOCUS_LABELS[focus]}")
+    st.session_state.roster_metadata = {k:st.session_state[k] for k in ('roster_date','roster_team','roster_title','roster_focus','roster_mode')}
     view = st.radio('Tabellenausschnitt',['Stammdaten','Lauftests','Sprungtests','Alle Angaben'],horizontal=True,key='roster_view')
     shared = ['Name','Zuordnung']
     sections = {'Stammdaten':ROSTER_LABELS[1:9],'Lauftests':ROSTER_LABELS[9:15]+['Shuttle-Angabe'],
@@ -1461,33 +1487,46 @@ def render_roster_import():
     st.markdown('Die zweite Spalte **„Profil in der App“** ergänzt die hochgeladene Tabelle. '
                 '**„Neu anlegen“** = ein neues Athletenprofil anlegen. **„Vorhanden: Name“** = das bestehende Profil ergänzen.')
     st.caption('Ist eine Person bereits unter anderer Schreibweise gespeichert, wähle hier ihr vorhandenes Profil. '
-               'Erst „Kader und Tests prüfen“ anklicken; übernommen wird erst beim anschließenden Speichern. Leere Angaben ändern vorhandene Stammdaten nicht.')
+               'Leere Angaben ändern vorhandene Stammdaten nicht.')
     edited = st.data_editor(pd.DataFrame(draft).fillna('').astype(str),hide_index=True,width='stretch',height=450,row_height=42,
         column_order=shared+sections[view],column_config=columns,num_rows='fixed',key=key,on_change=roster_sync_grid,args=(key,))
     rows = edited.to_dict('records')
     # Ignore unused template slots, but never drop a row containing an entered value.
     rows = [r for r in rows if any(field_text(r.get(k)) for k in ROSTER_LABELS)]
     st.download_button('Erfassungsentwurf herunterladen (CSV)',roster_csv(rows,datum.isoformat(),title,team,focus,identities),file_name='Doc_Athletic_Kader_und_Tests.csv',mime='text/csv')
-    correct = st.checkbox('Abweichende vorhandene Stammdaten und Testwerte übernehmen',key='roster_correct')
-    use_reference = st.checkbox('Vorhandene 60-m-Testzeiten als Trainingsreferenz übernehmen',value=True,key='roster_reference')
     state = dict(rows=rows,datum=datum.isoformat(),bogen=title,focus=focus,team=team,correct=correct,use_reference=use_reference,default_mode=mode)
     fingerprint = hashlib.sha256(json.dumps(state,ensure_ascii=False,sort_keys=True).encode()).hexdigest()
-    if st.button('Kader und Tests prüfen',type='primary'):
+    checked = st.session_state.get('roster_preview')
+    if not checked or checked['fingerprint'] != fingerprint or checked['revision'] != st.session_state.kader_revision:
+        checked = dict(fingerprint=fingerprint,revision=st.session_state.kader_revision,preview=[],changed=0)
         try:
             _, preview, changed = prepare_roster_batch(st.session_state.kader_db,**state)
-            st.session_state.roster_preview = dict(fingerprint=fingerprint,revision=st.session_state.kader_revision,preview=preview,changed=changed)
+            checked.update(preview=preview,changed=changed)
         except ValueError as exc:
-            st.session_state.pop('roster_preview',None)
-            st.error(str(exc))
-    checked = st.session_state.get('roster_preview')
-    if checked and checked['fingerprint'] == fingerprint:
-        st.subheader('Kontrolle vor der Übernahme')
-        st.dataframe(pd.DataFrame(checked['preview']),hide_index=True,width='stretch')
-        st.caption(f"{len(checked['preview'])} Personen geprüft; {checked['changed']} mit Änderungen. Fehlende Testergebnisse bleiben leer. Andere Profile und bisherige Trainingsverläufe bleiben erhalten.")
-        if st.button('Geprüften Kader und Tests gemeinsam speichern',disabled=not checked['changed'],type='primary'):
+            checked['error'] = str(exc)
+        st.session_state.roster_preview = checked
+    new_names = [r['Name'] for r in rows if r.get('Zuordnung') == ROSTER_NEW]
+    known_names = [identities[r['Zuordnung']][1] for r in rows if r.get('Zuordnung') in identities]
+    with status_area.container():
+        if not rows:
+            st.info('Trage die Personen unten ein. Anschließend kannst du sie hier in den Kader übernehmen.')
+        elif checked.get('error'):
+            st.error('Noch nicht übernommen. Bitte diese Angaben prüfen:\n\n'+checked['error'])
+            if 'Korrekturoption' in checked['error'] or 'Korrektur ausdrücklich' in checked['error']:
+                st.info('Wenn die Tabellenwerte richtig sind, aktiviere direkt darunter „Abweichende vorhandene Stammdaten und Testwerte übernehmen“. Danach wird die Übernahme freigegeben.')
+        elif checked['changed']:
+            st.warning('Vorschau bereit – diese Änderungen sind noch nicht in der Kaderliste gespeichert.')
+        else:
+            st.success('Übernahme abgeschlossen: Die Tabellenwerte sind im Kader gespeichert.' if st.session_state.get('roster_receipt') else 'Diese Tabellenwerte sind bereits im Kader gespeichert.')
+        if new_names:
+            st.write(f"**{len(new_names)} neue Profile:** "+', '.join(new_names))
+        if known_names:
+            st.write(f"**{len(known_names)} vorhandene Profile:** "+', '.join(known_names))
+    with action_area.container():
+        if st.button('In den Kader übernehmen',disabled=bool(checked.get('error')) or not checked['changed'],type='primary'):
             try:
                 if checked['revision'] != st.session_state.kader_revision:
-                    raise StorageConflict('Der Kader hat sich seit der Prüfung geändert. Bitte erneut prüfen.')
+                    raise StorageConflict('Der Kader hat sich seit der Vorschau geändert. Bitte den gespeicherten Stand neu laden.')
                 candidate, _, changed = prepare_roster_batch(st.session_state.kader_db,**state)
                 revision = speichere_kader_in_datei(candidate,checked['revision'])
                 st.session_state.kader_db = candidate
@@ -1500,12 +1539,16 @@ def render_roster_import():
                 st.session_state.roster_draft = rows
                 st.session_state.roster_epoch = epoch+1
                 st.session_state.pop('roster_preview',None)
-                st.session_state.save_notice = f'Kader und Tests für {changed} Personen gespeichert. Bitte anschließend eine Kader-Sicherung herunterladen.'
+                st.session_state.roster_receipt = True
+                st.session_state.save_notice = f'Übernahme abgeschlossen: {len(new_names)} neue Profile angelegt; {changed-len(new_names)} vorhandene Profile ergänzt. Die Personen stehen jetzt in der Kaderliste.'
                 st.rerun()
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:
-                st.error(f'Nichts gespeichert: {exc}')
-    elif checked:
-        st.info('Eingaben wurden geändert. Bitte erneut prüfen.')
+                st.error(f'Nicht übernommen: {exc}')
+        if rows and not checked.get('error') and not checked['changed']:
+            st.button('Kaderliste öffnen',on_click=navigiere,args=('Athleten',))
+    if checked['preview']:
+        with st.expander('Prüfergebnis und Trainingszuordnung ansehen'):
+            st.dataframe(pd.DataFrame(checked['preview']),hide_index=True,width='stretch')
 # Soll und Ist werden unabhängig voneinander versioniert gespeichert.
 PROTOCOL_COLUMNS = ["Übung", "Last (kg)", "Sätze", "Wdh. je Satz/Seite", "Strecke (m)", "Zeit (s)", "Technik", "Belastung", "Anmerkung"]
 NUMERIC_COLUMNS = PROTOCOL_COLUMNS[1:6]
@@ -1608,6 +1651,8 @@ def validate_sessions(sessions):
                 raise ValueError("Ungültiges Durchführungsdatum.") from None
         if "schwerpunkt" in item and item["schwerpunkt"] not in FOCUS_LABELS:
             raise ValueError("Unbekannter Schwerpunkt im Protokoll.")
+        if 'trainingsklasse' in item and item['trainingsklasse'] not in AGE_BANDS:
+            raise ValueError('Trainingsklasse des gespeicherten Plans prüfen.')
         validate_timing(item.get("timing", {}))
         rows = item.get("actual", [])
         if not isinstance(rows, list) or len(rows) > 150:
@@ -1646,6 +1691,8 @@ def save_unit_record(record, cycle, te, plan, source, actual=None, notes=None, p
     old = sessions.get(key)
     item = deepcopy(old) if old else {"cycle": cycle, "te": te, "original_plan": plan, "actual": [], "notes": ""}
     item.update(plan=plan, source=source)
+    if old is None or plan != old['plan']:
+        item['trainingsklasse'] = saved_training_band({'plan':plan}) or (old or {}).get('trainingsklasse') or record['profil'].split('_')[1]
     if actual is not None:
         item["actual"] = deepcopy(actual)
     if notes is not None:
@@ -1786,7 +1833,7 @@ def m_training_rows(value, sport, band, te, frequency=1, short_day=False):
     rows = []
     ball = config['ball']
     if ball['enabled']:
-        technique = ('Ballführung ausschließlich links beziehungsweise rechts; bei U11 eine Serie je Fuß; enge Richtungswechsel.'
+        technique = ('Ballführung ausschließlich links beziehungsweise rechts; '+('eine Serie je Fuß; ' if band=='U11' else '')+'enge Richtungswechsel.'
                      if sport == 'Fussball' else 'Dribbling links/rechts im Wechsel; enge Richtungswechsel.'
                      if sport == 'Basketball' else 'Ballkoordination nach eingetragener Organisationsform.')
         if ball['e2_progression'] and te < 4:
@@ -2009,7 +2056,7 @@ def organize_multisport_html(html, frequency, short_day, main_sets, sport, band,
     warm, hurdles, stations, running, cool = [], [], [], [], []
     has_ball_warmup = any(row[0] == '01 M-Lauf mit Ball' for row in parser.rows)
     for row in parser.rows:
-        if has_ball_warmup and sport == 'Fussball' and band in ('U11', 'U13') and row[0] == 'Erwärmung':
+        if has_ball_warmup and sport == 'Fussball' and band == 'U11' and row[0] == 'Erwärmung':
             continue  # The specific ball prescription replaces the generic ball warm-up.
         if len(row) != 7: raise ValueError('Trainingsmatrix benötigt sieben Spalten.')
         row = list(row)
@@ -2017,7 +2064,7 @@ def organize_multisport_html(html, frequency, short_day, main_sets, sport, band,
             index = next((i for i, r in enumerate(warm) if r[0].startswith('Block 1: ABC')), len(warm))
             warm.insert(index, row)
         elif row[0] == 'Erwärmung' or row[0].startswith('Block 1: ABC'):
-            if sport == 'Fussball' and band in ('U11', 'U13') and row[0] == 'Erwärmung':
+            if sport == 'Fussball' and band == 'U11' and row[0] == 'Erwärmung':
                 row[1] = 'Spielerische Erwärmung: Ballbeschleunigungen bis zur Mittellinie und zurück'
                 row[3] = 'Wettspielform; Ballführung links/rechts im Wechsel'
                 row[5] = 'Bewegungsqualität und Ballkontrolle'
@@ -2282,6 +2329,7 @@ def render_athlete_editor(selection=None,unit=None):
     veto_note=cfg.get('veto_notiz','') if veto else ''
     st.caption('Profiländerungen mit „Athletenprofil speichern“ übernehmen. Die Trainingsmatrix verwendet den gespeicherten Stand.')
     veto_action,save_action=st.columns(2)
+    save_veto=False
     if calendar:
         assignment=training_assignment(calendar,development,veto)
         st.caption(f"Altersklasse {calendar} → Trainingsplan {assignment['effective']}"+(' · Trainer-Veto' if veto else ''))
@@ -2293,7 +2341,11 @@ def render_athlete_editor(selection=None,unit=None):
             choice=st.selectbox('Trainingsklasse nach Trainer-Veto',options,index=options.index(veto or 'Automatisch'),key=opened+'_class')
             veto=None if choice=='Automatisch' else choice
             veto_note=st.text_input('Trainer-Notiz zur Zuordnung (optional)',veto_note,max_chars=4000,key=opened+'_note') if veto else ''
-    if save_action.button('Athletenprofil speichern',type='primary',disabled=guest):
+            selected=training_assignment(calendar,development,veto)
+            st.caption(f"Ausgewählt: Trainingsplan {selected['effective']}. Mit „Trainer-Veto anwenden“ speichern.")
+            save_veto=st.button('Trainer-Veto anwenden',type='primary',disabled=guest,key=opened+'_apply')
+    save_profile=save_action.button('Athletenprofil speichern',type='primary',disabled=guest)
+    if save_profile or save_veto:
         try:
             if not name or age is None or weight is None or height is None:
                 raise ValueError('Name, Alter, Körpergewicht und Körpergröße bitte eintragen.')
@@ -2309,7 +2361,7 @@ def render_athlete_editor(selection=None,unit=None):
             if updated.get('t_150_quelle','berechnet')=='berechnet':
                 updated.pop('t_150',None)
                 if t60 is not None:updated['t_150']=round(t60*2.375,2)
-            persist_record(sport,name,updated,'Athletenprofil gespeichert.')
+            persist_record(sport,name,updated,f"Athletenprofil gespeichert · Trainingsplan {updated['profil'].split('_')[1]}.")
         except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     if old:
         render_run_reference_editor(old,sport,old_name,unit)
@@ -2349,12 +2401,41 @@ def render_cycle_controls(record,sport,name,key):
             try:persist_record(sport,name,change_cycle(record,chosen,True),'Makrozyklus geöffnet.')
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
 
+def saved_training_band(item):
+    if item.get('trainingsklasse') in AGE_BANDS:
+        return item['trainingsklasse']
+    text='\n'.join(line for line in item.get('plan','').splitlines() if not re.match(r'^\s*(?:Begründung|Traineranweisung)\s*:',line))
+    bands=re.findall(r'\bTrainingsplan\s*:?\s*(U11|U13|U15|U17|U20|U23|MASTER)\b',text)
+    if not bands:
+        bands=re.findall(r'\b(U11|U13|U15|U17|U20|U23|MASTER)[ -]Plan\b',text)
+    return bands[0] if bands and len(set(bands))==1 else None
+
+def unit_has_results(item):
+    return bool(item.get('performed') or item.get('actual') or item.get('notes') or
+        any(item.get('timing',{}).get(k) is not None for k in ('actual_athletic_min','actual_transfer_min')))
+
+def split_trainer_instructions(plan):
+    lines, instructions = [], []
+    band=saved_training_band({'plan':plan})
+    for line in plan.splitlines():
+        if re.match(r'^\s*(?:Begründung|Traineranweisung)\s*:',line):
+            instructions.append(line.strip())
+            continue
+        suffix='. Trainer-Veto und individuelle Eignungsprüfung bleiben möglich.'
+        if line.startswith('Altersklasse ') and line.endswith(suffix):
+            instructions.append(suffix[2:])
+            line=line[:-len(suffix)]
+        if band and band!='U11':
+            line=line.replace('bei U11 eine Serie je Fuß; ','')
+        lines.append(line)
+    return '\n'.join(lines), instructions
+
 def saved_plan_html(plan):
     """Gespeicherten Plan darstellen; alte ABC-Bezeichnung angleichen, Werte erhalten."""
     headers=[['Block / Phase','Trainingsmittel / Übung','Sätze','Wdh. / Distanz',
               'Hardware / Zusatzlast','Intensität','Pause'],
              ['Abschnitt','Soll','Ist','Abweichung']]
-    lines=plan.splitlines()
+    lines=split_trainer_instructions(plan)[0].splitlines()
     def cells(line):
         stripped=line.strip()
         return [part.strip() for part in stripped[:-1].split('|')] if stripped.endswith('|') else None
@@ -2442,19 +2523,48 @@ def render_training():
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     generated=generate_unit(record,focus,te,name)
     standard_text=plan_as_text(generated)
-    current=saved['plan'] if saved else standard_text
-    if saved:st.caption('Gespeicherter Sollplan · bleibt bei späteren Profiländerungen erhalten.')
+    template_view=False
+    completed=unit_has_results(saved) if saved else False
+    saved_band=saved_training_band(saved) if saved else None
+    if saved and saved_band!=band:
+        st.info(f"Aktuelle Trainingsklasse: {band}. Gespeicherter Plan: {saved_band or 'Klasse nicht hinterlegt'}.")
+        views=[f'Aktueller {band}-Plan',f'Gespeicherter {saved_band}-Plan' if saved_band else 'Gespeicherter Sollplan']
+        view=st.radio('Angezeigter Plan',views,index=1 if completed else 0,horizontal=True,key=key('plan_view'))
+        template_view=view==views[0]
+    current=standard_text if not saved or template_view else saved['plan']
+    if template_view:
+        st.caption(f'Aktuelle {band}-Vorlage. Der bisherige Sollplan bleibt gespeichert, bis du die neue Vorlage übernimmst.')
+    elif saved:
+        st.caption('Gespeicherter Sollplan'+(' · Durchführung dokumentiert.' if completed else '.'))
     if current==standard_text:st.markdown(generated,unsafe_allow_html=True)
     else:st.markdown(saved_plan_html(current),unsafe_allow_html=True)
-    st.caption('Trainerverantwortung: Die individuelle Durchführung kann über das Veto angepasst werden.')
+    _, instructions=split_trainer_instructions(current)
+    with st.container(key='trainer_instructions'):
+        with st.expander('Traineranweisung'):
+            st.write(f"Altersklasse {record['kalenderklasse']} · {record['reife']} · Trainingsplan {band}.")
+            note=record.get('trainingszuordnung',{}).get('veto_notiz')
+            if note:st.write(note)
+            for instruction in instructions:st.write(instruction)
+            if 'Trainer-Veto und individuelle Eignungsprüfung bleiben möglich.' not in instructions:
+                st.write('Trainer-Veto und individuelle Eignungsprüfung bleiben möglich.')
+    key=lambda field:widget_key(field,sport,focus+'_'+cycle+'_'+str(te)+('_vorlage' if template_view else '_sollplan'),name)
+    editable=not (template_view and completed)
+    if template_view and completed:
+        st.caption('Die dokumentierte Durchführung gehört zum gespeicherten Plan. Für eine neue Durchführung eine offene Einheit wählen.')
     if not guest:
         if not saved and st.button('Einheit speichern',type='primary',key=key('save')):
             try:persist_record(sport,name,save_unit_record(record,cycle,te,current,'Standardplan',focus=focus),'Einheit gespeichert.')
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
+        if template_view and not completed and st.button(f'{band}-Plan für diese Einheit übernehmen',type='primary',key=key('adopt')):
+            try:
+                updated=save_unit_record(record,cycle,te,standard_text,'Trainer-Zuordnung',focus=focus)
+                persist_record(sport,name,updated,f'{band}-Plan übernommen. Die vorherige Fassung bleibt im Verlauf.')
+            except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
         for label,field in [('Trainer-Veto für diese Einheit','veto'),('Durchführung notieren','actual'),('Makrozyklus verwalten','cycle')]:
+            if field!='cycle' and not editable:continue
             if st.button(label,key=key(field+'_button')):
                 st.session_state[key(field+'_open')]=not st.session_state.get(key(field+'_open'),False)
-        if st.session_state.get(key('veto_open')):
+        if editable and st.session_state.get(key('veto_open')):
             edited=st.text_area('Verbindlicher Sollplan dieser Einheit',current,height=400,max_chars=100000,key=key('veto_text'))
             st.caption('Die geänderte Fassung ersetzt den Sollplan dieser Einheit. Andere Einheiten bleiben unverändert.')
             if st.button('Trainer-Veto speichern',key=key('veto_save')):
@@ -2464,7 +2574,7 @@ def render_training():
                     if edited!=current:updated=save_unit_record(updated,cycle,te,edited,'Trainer-Veto',focus=focus)
                     persist_record(sport,name,updated,'Trainer-Veto gespeichert.')
                 except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
-        if st.session_state.get(key('actual_open')):
+        if editable and st.session_state.get(key('actual_open')):
             performed=st.date_input('Durchgeführt am',date.fromisoformat(saved.get('performed',date.today().isoformat())) if saved else date.today(),key=key('performed'))
             note=st.text_area('Beobachtung / Belastung / Abweichung',saved.get('notes','') if saved else '',max_chars=4000,key=key('actual_note'))
             actual=saved.get('actual',[]) if saved else []
@@ -2482,7 +2592,7 @@ def render_training():
                 except ValueError as exc:st.error(str(exc));actual_error=True
             if st.button('Durchführung speichern',key=key('actual_save'),disabled=actual_error):
                 try:
-                    updated=save_unit_record(record,cycle,te,current,saved['source'] if saved else 'Standardplan',actual=actual,notes=note,performed=performed.isoformat(),focus=focus)
+                    updated=save_unit_record(record,cycle,te,current,'Trainer-Zuordnung' if template_view else saved['source'] if saved else 'Standardplan',actual=actual,notes=note,performed=performed.isoformat(),focus=focus)
                     persist_record(sport,name,updated,'Durchführung gespeichert; fehlende Einzelwerte wurden nicht ergänzt.')
                 except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
         if st.session_state.get(key('cycle_open')):render_cycle_controls(record,sport,name,key)
@@ -2810,7 +2920,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     </div>
     <p style="color: #ffffff !important; font-size: 14px; margin-top: 8px;"><strong>Schwerpunkt:</strong> {escape(FOCUS_LABELS[focus])} | <strong>Makrozyklus:</strong> {escape(aktuelle_daten.get("aktiver_makrozyklus", "Bestand"))} | <strong>Athlet:</strong> {escape(ziel)} ({gewicht} kg) | <strong>Woche:</strong> {week}, Einheit {day} | <strong>Ziel:</strong> {day_label} | <strong>Phase:</strong> {effective_phase} (vorgesehen: {planned_phase}) | <strong>Lauf-ABC Last:</strong> {abc_last_str}</p>
     <p>{escape(test_note)}</p>
-    <p>{escape(assignment_text)}. Trainer-Veto und individuelle Eignungsprüfung bleiben möglich.</p>
+    <p>{escape(assignment_text)}</p>
     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; color: #000000; border: 1px solid #7F7F7F;">
     <thead>
     <tr style="background-color: #1F4E78; color: #FFFFFF; font-weight: bold;">

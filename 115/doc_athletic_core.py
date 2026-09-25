@@ -82,8 +82,8 @@ def abc_rows_115(band, gender, week, progression, start=None):
     rows = []
     for name in ("Kniehebelauf", "Anfersen", "Seitlicher Nachstellschritt", "Hopserlauf"):
         direction = "; je einmal in beide Richtungen" if name == "Seitlicher Nachstellschritt" else ""
-        rows.append(["Block 1: ABC", name, "2 × Shuttle",
-                     f"Je {distance:g} m hin + {distance:g} m Beschleunigung zurück; {4*distance:g} m insgesamt" + direction,
+        rows.append(["Block 1: ABC", name, "2 Bahnen insgesamt" + direction,
+                     f"Je {distance:g} m hin + {distance:g} m Beschleunigung zurück; {4*distance:g} m insgesamt",
                      equipment, "Kontrollierter Geschwindigkeitsaufbau auf dem Rückweg", PARTNER_PAUSE])
     return rows
 
@@ -167,11 +167,12 @@ PHASE_EXERCISES={'front_squat':'Front Squat','kreuzheben':'Kreuzheben','anreiss'
 PHASE_BAGS=(5,8,10,12,15,17,20)
 
 def phase_defaults():
-    return {'enabled':True,'basis':6,'jumps':3,'spruenge':3,'jumps_ready':False,'spruenge_ready':False,'references':{}}
+    # Frank Müller, 25.09.2026: Stand 6 · Jumps 5 · Sprünge 5; Wechsel automatisch, Trainer-Veto je Athlet.
+    return {'enabled':True,'basis':6,'jumps':5,'spruenge':5,'jumps_ready':True,'spruenge_ready':True,'u11_spruenge':False,'references':{}}
 
 def phase_validate(config):
     if not isinstance(config,dict):raise ValueError('Phasenplanung muss ein Objekt sein.')
-    for k in ['enabled','jumps_ready','spruenge_ready']:
+    for k in ['enabled','jumps_ready','spruenge_ready','u11_spruenge']:
         if type(config.get(k,phase_defaults()[k])) is not bool:raise ValueError('Ungültige Phasenfreigabe.')
     for k in ['basis','jumps','spruenge']:
         if type(config.get(k,phase_defaults()[k])) is not int or not 1<=config.get(k,phase_defaults()[k])<=14:raise ValueError('Je Phase 1–14 Einheiten eintragen.')
@@ -198,16 +199,18 @@ def phase_status(config,band,te):
     cfg=phase_defaults();cfg.update(config or {})
     try:phase_validate(cfg)
     except ValueError:return 'Eingaben prüfen','Grundlast'
-    if not cfg['enabled'] or band in ('U11','U13'):return 'Bestehender Plan','Bestehender Plan'
+    if not cfg['enabled']:return 'Bestehender Plan','Bestehender Plan'
     if te>cfg['basis']+cfg['jumps']+cfg['spruenge']:return 'Zyklus abgeschlossen','Zyklus abgeschlossen'
+    # Interner Name 'Grundlast' = Phase „Stand“ (Füße bleiben am Boden).
     planned='Grundlast' if te<=cfg['basis'] else 'Jumps' if te<=cfg['basis']+cfg['jumps'] else 'Sprünge'
     if planned=='Grundlast':return planned,planned
     if not cfg['jumps_ready']:return planned,'Grundlast'
-    if planned=='Jumps' or band=='U15':return planned,'Jumps'
+    # U11: Sprünge auf der Stelle nur nach ausdrücklicher Trainerfreigabe.
+    if planned=='Jumps' or (band=='U11' and not cfg.get('u11_spruenge')):return planned,'Jumps'
     return planned,'Sprünge' if cfg['spruenge_ready'] else 'Jumps'
 
 def phase_exercise_label(kind,effective):
-    if effective=='Grundlast':return {'front_squat':'Front Squat – Grundlast und Technik','kreuzheben':'Kreuzheben – Grundlast und Technik','anreiss':'Anreiß-Streckung – Grundlast und Technik'}[kind]
+    if effective=='Grundlast':return {'front_squat':'Front Squat – Stand (Technik)','kreuzheben':'Kreuzheben – Stand (Technik)','anreiss':'Anreißen – Stand (Technik)'}[kind]
     return PHASE_EXERCISES[kind]+(' Jumps' if effective=='Jumps' else ' Sprünge')
 
 def weekly_reps(start, week, cap, approved, step=1):
@@ -252,7 +255,7 @@ def powerbag_load(band, gender, override=0):
     if band == "U11":
         return "Körpergewicht; keine Powerbag-Zusatzlast hinterlegt"
     ranges = {
-        "U13": ("8–10", "8–12"),
+        "U13": ("5–8", "8–12"),  # Frank 25.09.2026
         "U15": ("8–12", "12–15 kg; bei Bedarf z. B. 10"),
         "U17": ("8–10", "15"),
         "U20": ("8–12", "17"),

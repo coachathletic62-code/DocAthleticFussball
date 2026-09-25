@@ -129,7 +129,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '24.09.2026, 16:44 Uhr deutscher Zeit · wirksame Trainingsklasse und separate Traineranweisung'
+BUILD_STAND = '25.09.2026 · Stufe 1: 16 Einheiten, Kraftphasen Stand–Jumps–Sprünge, Tempolauf-Pyramiden, Retest, Empfehlungen für den Folgezyklus'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -292,7 +292,7 @@ def apply_training_assignment(record, calendar, development, gender, veto_band=N
     if changed:
         # Retain schedule and measured test references, never an older class's load overrides.
         retained = {"einheiten","startwoche","rolle","test_distanz","test_zeit",
-                    "tempo_interpolation","tempo_extrapolation","organisation"}
+                    "tempo_interpolation","tempo_extrapolation","organisation","zyklus_einheiten"}
         def reset_plan(plan):
             reset = {**{k:deepcopy(v) for k,v in plan.items() if k in retained},"progression":True}
             if 'organisation' in reset:
@@ -327,6 +327,107 @@ def apply_training_assignment(record, calendar, development, gender, veto_band=N
         updated["sbe"] = PROFILE_DEFAULTS[football_profile(updated["profil"],gender)]["sbe_ziel"]
     return updated, result, changed
 
+# Frank Müller, 25.09.2026: 14 Einheiten je Halbjahr; bei 15/16 Einheiten werden
+# nach TE 11 Steigerungseinheiten eingeschoben. Shuttle, Marathon und Abschlusstest
+# folgen immer als letzte drei Einheiten.
+CYCLE_UNIT_CHOICES = (14, 15, 16)
+PHASE_NAMES = {"Grundlast": "Stand", "Jumps": "Jumps", "Sprünge": "Sprünge"}
+def cycle_units(record, focus):
+    units = focus_settings(record, focus).get("planung", {}).get("zyklus_einheiten", 16)
+    return units if units in CYCLE_UNIT_CHOICES else 16
+def cycle_plan(record, focus, band):
+    """Phasen passend zur Einheitenzahl; die letzte Einheit ist der Retest."""
+    units = cycle_units(record, focus)
+    cfg = phase_defaults()
+    cfg.update(record.get("phasensteuerung", {}))
+    if cfg["enabled"]:
+        gap = units - (cfg["basis"] + cfg["jumps"] + cfg["spruenge"])
+        if gap > 0 and cfg["spruenge"] + gap <= 14:
+            cfg["spruenge"] += gap
+        while gap < 0 and cfg["spruenge"] > 1:
+            cfg["spruenge"] -= 1; gap += 1
+        while gap < 0 and cfg["jumps"] > 1:
+            cfg["jumps"] -= 1; gap += 1
+        total = max(units, cfg["basis"] + cfg["jumps"] + cfg["spruenge"])
+    else:
+        total = units
+    return cfg, total, units
+# Frank Müller, 25.09.2026: Wiederholungen Jungs 8 → +1 → 15, Mädchen 10 → +1 → 20.
+def rep_rule(gender, level):
+    start, cap = (10, 20) if gender == "Weiblich" else (8, 15)
+    reps = start + max(0, level - 1)
+    if reps <= cap:
+        return f"{reps} Wdh."
+    return f"{cap} Wdh. · Obergrenze erreicht: nächste Laststufe nach Tonnage-Regel (Trainer)"
+# Tempolauf-Pyramiden: Start in TE 1, dann +50 m je Einheit (U13: +25 m) bis zur Obergrenze.
+TEMPO_START = {("U13", "Männlich"): [100, 100, 50], ("U13", "Weiblich"): [100, 100, 50],
+               ("U15", "Männlich"): [250, 200, 150], ("U15", "Weiblich"): [250, 200, 150],
+               ("U17", "Männlich"): [500, 300, 200], ("U17", "Weiblich"): [250, 200, 150],
+               ("U20", "Männlich"): [500, 300, 200], ("U20", "Weiblich"): [500, 400, 300],
+               ("U23", "Männlich"): [600, 400, 300], ("U23", "Weiblich"): [500, 400, 300],
+               ("MASTER", "Männlich"): [600, 400, 300], ("MASTER", "Weiblich"): [500, 400, 300]}
+TEMPO_CAP = {("U13", "Männlich"): 150, ("U13", "Weiblich"): 150, ("U15", "Männlich"): 600, ("U15", "Weiblich"): 600,
+             ("U17", "Männlich"): 700, ("U17", "Weiblich"): 600, ("U20", "Männlich"): 800, ("U20", "Weiblich"): 600,
+             ("U23", "Männlich"): 800, ("U23", "Weiblich"): 800, ("MASTER", "Männlich"): 800, ("MASTER", "Weiblich"): 800}
+def tempo_pyramid(band, gender, level):
+    """Zuerst den letzten Lauf an den vorherigen angleichen, dann den davor;
+    sind alle gleich, den ersten Lauf verlängern. Nie über die Obergrenze."""
+    runs = list(TEMPO_START[(band, gender)])
+    cap = TEMPO_CAP[(band, gender)]
+    step = 25 if band == "U13" else 50
+    for _ in range(max(0, level - 1)):
+        for j in range(len(runs) - 1, 0, -1):
+            if runs[j] < runs[j - 1]:
+                runs[j] = min(runs[j] + step, runs[j - 1])
+                break
+        else:
+            if runs[0] + step <= cap:
+                runs[0] += step
+    return runs
+def tempo_intensity(distance, band=None):
+    if band == "U13":
+        return "60–70 %"  # TM-Liste D1: Tempoläufe bis 150 m bei 60–70 %
+    return "60 %" if distance >= 500 else "70 %" if distance >= 250 else "80 %"
+def u11_endurance(level):
+    """E2-Praxis 2025: alaktazid, Grundlagenausdauer locker im Team-Style."""
+    if level <= 4: return "1 × 400 m"
+    if level <= 7: return "2 × 400 m"
+    if level == 8: return "2 × 550 m"
+    return "2 × 600 m (Richtwert 2:28–3:05 min)"
+def retest_html(band, gender, bag_text, gb_last_kg, name, cycle):
+    distances = {"U11": ("20 m", "40 m", None), "U13": ("30 m", "60 m", "150 m")}.get(band, ("60 m", "250 m", "600 m"))
+    ball = f"Griffball {gb_last_kg} kg"
+    squat = "5× Front Squat Jumps" if band == "U11" else "5× Squat-Sprünge"
+    ums = "5× Umsatz/Ausstoß-Jumps" if band == "U11" else "5× Umsatz/Ausstoß-Sprünge"
+    rows = [["Retest Block 1", squat, "1", distances[0] + " Sprint auf Zeit", bag_text, "Maximal", "Volle Erholung"],
+            ["Retest Block 2", ums, "1", distances[1] + " auf Zeit", ball, "Maximal", "Volle Erholung"]]
+    if distances[2]:
+        rows.append(["Retest Block 3", "5× seitl. Pendel-Shuttle über Hürde", "1", distances[2] + " auf Zeit", "Hürde", "Maximal", "Volle Erholung"])
+    else:
+        rows.append(["Retest Block 3", "5er-Hop links / rechts, 5er-Schlusssprung", "je 1", "Weite in m", "ohne", "Maximal", "Volle Erholung"])
+    body = "".join("<tr>" + "".join("<td>" + escape(c) + "</td>" for c in r) + "</tr>" for r in rows)
+    head = "".join("<th>" + h + "</th>" for h in ["Block / Phase", "Trainingsmittel / Übung", "Sätze", "Wdh. / Distanz", "Hardware / Zusatzlast", "Intensität", "Pause"])
+    return ('<div class="druck-block doc-saved-plan"><h3>TRAININGSMATRIX - EINHEIT: RETEST</h3>'
+            f'<p>Standard-Retest am Zyklusende · Makrozyklus: {escape(cycle)} · Athlet: {escape(name)}</p>'
+            '<p>Erwärmung 800 m einlaufen, Lauf-ABC. Jeweils Kraftteil direkt vor dem Lauf auf Zeit. Zeiten unter „Durchführung notieren“ eintragen; sie dienen dem Jahresvergleich. Per Trainer-Veto kann der Retest anders gestaltet werden (z. B. Komplex-Shuttle oder Marathon).</p>'
+            '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>')
+def set_cycle_units(record, focus, units):
+    if units not in CYCLE_UNIT_CHOICES:
+        raise ValueError("Bitte 14, 15 oder 16 Einheiten wählen.")
+    updated = deepcopy(record)
+    settings = updated.setdefault("fussball_schwerpunkte", {})
+    if focus not in settings:
+        settings[focus] = focus_settings(record, focus)
+    settings[focus].setdefault("planung", {})["zyklus_einheiten"] = units
+    return updated
+def tempo_cycle_position(te, units):
+    """Position in der 14er-Laufreihe und Nummer der Steigerungseinheit (0 = keine)."""
+    extra = max(0, units - 14)
+    if te <= 11:
+        return te, 0
+    if te <= 11 + extra:
+        return 11, te - 11
+    return te - extra, 0
 def focus_unit_key(record, cycle, te, focus):
     if focus is None:
         return json.dumps([cycle, te], ensure_ascii=False)
@@ -657,7 +758,7 @@ def read_field_file(data, filename, identities):
             dates.add(field_date(record['Datum']))
         if field_text(record.get("Testbezeichnung")):
             titles.add(field_text(record['Testbezeichnung']))
-        if field_text(record.get('Shuttleform')) or field_text(record.get('Strecke je Weg (m)'), record.get('Wendezuschlag gesamt (m)')):
+        if field_text(record.get('Shuttleform')) or field_text(record.get('Strecke je Weg (m)')) or field_text(record.get('Wendezuschlag gesamt (m)')):
             config = shuttle_definition(field_text(record.get('Shuttleform')), record.get('Strecke je Weg (m)'), record.get('Wendezuschlag gesamt (m)'))
             shuttles.add((config['form'],config['weg_m'],config.get('wendezuschlag_m',0)))
         rows.append(row)
@@ -1886,7 +1987,7 @@ def validate_plan_settings(plan):
     ranges = {"einheiten":(1,2), "startwoche":(1,52), "bag_start":(1,20),
               "burpee_start":(1,30), "cheer_start":(0,30), "single_start":(0,30), "beid_start":(0,30),
               "kreuzheben_last":(0,500), "bag_last":(0,30), "test_distanz":(50,1500), "test_zeit":(0,900),
-              "test_prozent":(50,100), "steigerung_wdh":(0,5), "abc_step":(0,10), "abc_start_m":(10,15)}
+              "test_prozent":(50,100), "steigerung_wdh":(0,5), "abc_step":(0,10), "abc_start_m":(10,15), "zyklus_einheiten":(14,16)}
     for key, (low, high) in ranges.items():
         value = plan.get(key)
         if value is not None and (type(value) not in (int,float) or not math.isfinite(value) or not low <= value <= high):
@@ -1987,6 +2088,15 @@ def validate_kader(kader):
                 validate_kader({"Fussball": {name: snapshot} if sport == "Fussball" else {},
                                 "Leichtathletik": {name: snapshot} if sport == "Leichtathletik" else {}})
             validate_plan_settings(p.get("planung", {}))
+            level = p.get("zyklus_einstieg", 1)
+            if type(level) is not int or not 1 <= level <= 16:
+                raise ValueError("Einstiegsniveau des Makrozyklus prüfen.")
+            for field in ("empfehlungen_naechster", "empfehlungen_aktiv"):
+                recs = p.get(field, {})
+                if not isinstance(recs, dict) or len(recs) > 100 or any(
+                        not isinstance(k, str) or len(k) > 60 or not isinstance(v, str) or not 0 < len(v) <= 100000
+                        for k, v in recs.items()):
+                    raise ValueError("Empfehlungen für den nächsten Makrozyklus prüfen.")
             if p.get("trainingsschwerpunkt", "komplex") not in FOCUS_LABELS:
                 raise ValueError("Unbekannter Fußball-Schwerpunkt.")
             settings = p.get("fussball_schwerpunkte", {})
@@ -2386,11 +2496,24 @@ def change_cycle(record, name, restore=False):
     else:
         updated['phasensteuerung']=phase_defaults()
         updated.setdefault('planung',{}).update(startwoche=1,progression=True)
+        # Frank, 25.09.2026: Einstieg U11–U15 auf Niveau TE 10, ab U17 TE 8; Trainer-Veto.
+        band=updated.get('profil','Fussball_U15').split('_')[1]
+        updated['zyklus_einstieg']=10 if band in ('U11','U13','U15') else 8
+        updated['empfehlungen_aktiv']=updated.pop('empfehlungen_naechster',{})
     archive[active]=snapshot
     updated.update(makrozyklen=archive,aktiver_makrozyklus=name)
     return updated
 
 def render_cycle_controls(record,sport,name,key):
+    level=int(record.get('zyklus_einstieg',1))
+    chosen=st.selectbox('Einstieg dieses Zyklus auf dem Niveau von',list(range(1,17)),index=level-1,
+        format_func=lambda n:f'TE {n}' if n>1 else 'TE 1 (Grundniveau)',key=key('cycle_level'),
+        help='Neuer Zyklus: U11–U15 wie TE 10, ab U17 wie TE 8. Per Trainer-Veto änderbar.')
+    if chosen!=level and st.button('Einstieg speichern',key=key('cycle_level_save')):
+        try:
+            updated=deepcopy(record);updated['zyklus_einstieg']=chosen
+            persist_record(sport,name,updated,f'Einstieg auf Niveau TE {chosen} gespeichert.')
+        except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     cycle_name=st.text_input('Name des neuen Makrozyklus',key=key('cycle_name'))
     if st.button('Neuen Makrozyklus beginnen',key=key('cycle_new')):
         try:persist_record(sport,name,change_cycle(record,cycle_name.strip()),'Neuer Makrozyklus begonnen.')
@@ -2495,14 +2618,20 @@ def render_training():
     with focus_column:
         focus=st.radio('Trainingsbereich',list(FOCUS_LABELS),format_func=FOCUS_LABELS.get,horizontal=True,key='training_focus')
     cycle=record.get('aktiver_makrozyklus','Bestand')
-    cfg=phase_defaults();cfg.update(record.get('phasensteuerung',{}))
     band=record['profil'].split('_')[1]
-    total=sum(cfg[k] for k in ('basis','jumps','spruenge')) if cfg['enabled'] and band not in ('U11','U13') else 14
+    cfg,total,units_now=cycle_plan(record,focus,band)
+    with unit_column:
+        chosen_units=st.selectbox('Einheiten im Halbjahr',CYCLE_UNIT_CHOICES,index=CYCLE_UNIT_CHOICES.index(units_now),
+            key=widget_key('cycle_units',sport,focus,name),disabled=guest,
+            help='Standard 16. Die letzte Einheit ist immer der Retest für den Jahresvergleich.')
+    if chosen_units!=units_now and not guest:
+        try:persist_record(sport,name,set_cycle_units(record,focus,chosen_units),f'Halbjahr auf {chosen_units} Einheiten eingestellt.')
+        except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     archived_units={item['te'] for item in record.get('einheitenprotokoll',{}).values()
                     if item.get('cycle')==cycle and item.get('schwerpunkt',legacy_focus(record))==focus}
     options=sorted(set(range(1,total+1))|archived_units)
     with unit_column:
-        te=st.selectbox('Trainingseinheit (TE)',options,format_func=lambda n:f'TE {n}',key='training_te')
+        te=st.selectbox('Trainingseinheit (TE)',options,format_func=lambda n:f'TE {n} · Retest' if n==units_now else f'TE {n}',key='training_te')
     with st.container(border=True):
         render_athlete_editor(selection,(cycle,te,focus))
     saved=record.get('einheitenprotokoll',{}).get(focus_unit_key(record,cycle,te,focus))
@@ -2521,8 +2650,28 @@ def render_training():
                 record.setdefault('phasensteuerung',{})[flag]=True
                 persist_record(sport,name,record,'Phasenwechsel für neue Vorlagen freigegeben.')
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
+    if not guest:
+        with st.expander('Kraftphasen dieses Athleten (Trainer-Veto)'):
+            st.caption('Standard: Stand 6 · Jumps 5 · Sprünge 5. Früher oder später wechseln, je nach Athlet.')
+            stored=record.get('phasensteuerung',{})
+            base=phase_defaults();base.update(stored)
+            a,b,c=st.columns(3)
+            lengths=[x.selectbox(label,list(range(1,15)),index=base[k]-1,key=key('phase_'+k))
+                     for x,label,k in ((a,'Stand (TE)','basis'),(b,'Jumps (TE)','jumps'),(c,'Sprünge (TE)','spruenge'))]
+            u11=st.checkbox('U11: Sprünge auf der Stelle freigeben',value=bool(base.get('u11_spruenge')),key=key('phase_u11')) if band=='U11' else bool(base.get('u11_spruenge'))
+            if st.button('Kraftphasen speichern',key=key('phase_save')):
+                try:
+                    updated=deepcopy(record)
+                    updated.setdefault('phasensteuerung',{}).update(basis=lengths[0],jumps=lengths[1],spruenge=lengths[2],u11_spruenge=u11,jumps_ready=True,spruenge_ready=True)
+                    phase_validate(updated['phasensteuerung'])
+                    persist_record(sport,name,updated,f'Kraftphasen gespeichert: Stand {lengths[0]} · Jumps {lengths[1]} · Sprünge {lengths[2]}.')
+                except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     generated=generate_unit(record,focus,te,name)
     standard_text=plan_as_text(generated)
+    recommendation=record.get('empfehlungen_aktiv',{}).get(f'{focus}|{te}')
+    if recommendation and not saved:
+        st.info('Für diese Einheit liegt deine Empfehlung aus dem vorherigen Makrozyklus vor. Sie hat Vorrang vor der Tabellenvorlage.')
+        generated=saved_plan_html(recommendation);standard_text=recommendation
     template_view=False
     completed=unit_has_results(saved) if saved else False
     saved_band=saved_training_band(saved) if saved else None
@@ -2552,6 +2701,12 @@ def render_training():
     if template_view and completed:
         st.caption('Die dokumentierte Durchführung gehört zum gespeicherten Plan. Für eine neue Durchführung eine offene Einheit wählen.')
     if not guest:
+        if st.button(f'Als Empfehlung für TE {te} im nächsten Makrozyklus speichern',key=key('recommend')):
+            try:
+                updated=deepcopy(record)
+                updated.setdefault('empfehlungen_naechster',{})[f'{focus}|{te}']=current
+                persist_record(sport,name,updated,f'Empfehlung für TE {te} des nächsten Makrozyklus gespeichert.')
+            except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
         if not saved and st.button('Einheit speichern',type='primary',key=key('save')):
             try:persist_record(sport,name,save_unit_record(record,cycle,te,current,'Standardplan',focus=focus),'Einheit gespeichert.')
             except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
@@ -2639,9 +2794,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     speed_mode=focus=='speed_jump'
     saved=focus_settings(record,focus).get('planung',{})
     einheiten=int(saved.get('einheiten',1)); startwoche=1; role='Automatisch nach Wochenrhythmus'
-    phase_config=phase_defaults()
-    phase_config.update({k:v for k,v in record.get('phasensteuerung',{}).items() if k!='references'})
-    speed_total_units=sum(phase_config[k] for k in ('basis','jumps','spruenge')) if phase_config['enabled'] else 14
+    phase_config,speed_total_units,cycle_length=cycle_plan(record,focus,band)
     speed_config=speed_jump_defaults(band,geschlecht_wahl)
     hurdle_config=hurdle_defaults(); m_config=m_training_defaults('Fussball',band); org_config={}
     # Previously documented exercise starts remain references, not extra setup questions.
@@ -2667,7 +2820,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     strength_exercise = "Kreuzhebe-Streckung"
     if band == "U13" or (band == "U15" and geschlecht_wahl == "Weiblich"):
         strength_exercise = "Anreiß-Jumps / Anreiß-Sprünge (Powerbag)"
-        hex_text = ("Powerbag 8–10 kg" if geschlecht_wahl == "Weiblich" else "Powerbag 8–12 kg") if band == "U13" else "Powerbag 10–15 kg"
+        hex_text = ("Powerbag 5–8 kg" if geschlecht_wahl == "Weiblich" else "Powerbag 8–12 kg") if band == "U13" else "Powerbag 10–15 kg"
     elif band not in ["U11", "U13"]:
         ranges = {"U15":("", "30–45"), "U17":("30–40", "40–60"), "U20":("40–50", "50–70"), "U23":("40–60", "60–85"), "MASTER":("40–60", "60–85")}
         hex_text = "Hex Bar " + ranges[band][0 if geschlecht_wahl == "Weiblich" else 1] + " kg (Lastbereich)"
@@ -2692,21 +2845,28 @@ def generate_unit(record, focus, te, name="Athlet"):
         hex_text = "2 kg je Kurzhantel"
         bag_exercise = "Front Squat Jumps"
         bag_text = "2 kg je Kurzhantel"
+    if te_num == cycle_length:
+        return retest_html(band, geschlecht_wahl, bag_text, gb_last_kg, ziel, aktuelle_daten.get("aktiver_makrozyklus", "Bestand"))
     if effective_phase=="Zyklus abgeschlossen":
         html_matrix=f'<div class="druck-block"><h3>TRAININGSMATRIX - EINHEIT: TE {te_num}</h3><p>Außerhalb des konfigurierten Makrozyklus. Neuen Zyklus planen oder Phasenlängen ändern. Gespeicherte Soll-/Ist-Protokolle bleiben unten abrufbar.</p></div>'
         return html_matrix
     if effective_phase in ("Grundlast","Jumps","Sprünge"):
         bag_exercise=phase_exercise_label("front_squat",effective_phase)
-        kind="anreiss" if band=="U15" and geschlecht_wahl=="Weiblich" else "kreuzheben"
+        kind="anreiss" if band=="U13" or (band=="U15" and geschlecht_wahl=="Weiblich") else "kreuzheben"
         strength_exercise=phase_exercise_label(kind,effective_phase)
     week, day, short_day = unit_context(te_num, einheiten, startwoche, role)
+    # Einstieg im Folgezyklus auf höherem Niveau (Frank, 25.09.2026).
+    einstieg = int(record.get('zyklus_einstieg', 1))
+    level = te_num + einstieg - 1
+    week += einstieg - 1
     # Existing 14-block sequence is keyed to TE, never to calendar week.
-    woche = te_num
+    # Bei 15/16 Einheiten: Steigerungseinheiten nach TE 11, Test in der letzten TE.
+    woche, steigerung = tempo_cycle_position(te_num, cycle_length)
     abc_rows = abc_rows_115(band, geschlecht_wahl, week, True, 10.0)
     warmup = warmup_text(band, te_num)
     bag_count = weekly_reps(10, week, 15, True)
     quality_day = short_day or speed_mode
-    bag_wdh = "8–6–5 Wdh. (3 Sätze)" if quality_day else f"{bag_count} Wdh. je Satz"
+    bag_wdh = "8–6–5 Wdh. (3 Sätze)" if quality_day else rep_rule(geschlecht_wahl, level) + " je Satz"
     day_label = "Vollständige Komplexeinheit · 1 TE/Woche" if einheiten == 1 else ("Neuromuskulär / vor dem Spiel" if short_day else "Haupttag")
     split_main = einheiten == 2 and not short_day
     main_sets = str(org_config.get("main_sets", 4)) if split_main else "3"
@@ -2727,7 +2887,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     if quality_day:
         extra_rows += exercise_row("Komplextransfer: Hürdensprünge / Hürden-Steigesprung / kurze Sprints", "3", "5–8 Wiederholungen; Techniktransfer", "Körpergewicht", "Neuromuskulärer Erinnerungsreiz")
     else:
-        burpee_rep = str(weekly_reps(8 if geschlecht_wahl == "Weiblich" else 10,week,100,True)) + " Wdh."
+        burpee_rep = rep_rule(geschlecht_wahl, level)
         extra_rows += exercise_row("Burpees / Liegestützsprünge mit Strecksprung", "3", burpee_rep, "Powerbar 2–3 kg gesamt" if plan_age >= 14 else "Zusatzlast nicht hinterlegt", f"+1 Wdh./Woche")
         paired = weekly_reps(cheer_start,week,100,True) if cheer_start else 0
         pair_text = f"{paired} links + {paired} rechts = {paired*2} gesamt" if paired else "Start je Seite noch festlegen"
@@ -2851,6 +3011,27 @@ def generate_unit(record, focus, te, name="Athlet"):
             tl_pos = "nach_komplex"
             tl_text = "Abschlusstest: 60m Sprint + 250m Sprint + 600m Test auf Zeit"
             tl_pause = "Volle Erholung"
+    if steigerung:
+        # Längster Lauf bleibt bei der bisherigen Höchststrecke (600/700/800 m).
+        tl_pos = "vor_komplex"
+        tl_pause = "100m Gehpause"
+        if plan_age <= 15:
+            tl_text = f"3 x 600m TL (Richtwert 1:40 min) + {4 + steigerung} x 150m Speed"
+        elif plan_age <= 17:
+            tl_text = f"GLA vorab: 1 x 700m Kappe + 2 x {min(600, 500 + 50 * steigerung)}m + 3 x 150m Speed"
+        else:
+            strecke = min(600, 500 + 50 * steigerung)
+            tl_text = f"GLA vorab: 800m Basis + 600m, 600m + {strecke}m, {strecke}m (je 100m GP)"
+        tl_text += f" · Steigerungseinheit {steigerung} nach TE 11"
+    # Frank Müller, 25.09.2026: TE 1–15 Tempolauf-Pyramide nach 50-m-Regel; U11 alaktazid.
+    tl_pos = "nach_komplex"
+    if band == "U11":
+        tl_text = "GL-Ausdauer im Team-Style, locker: " + u11_endurance(level)
+        tl_pause = "Staffelform / Team-Style"
+    else:
+        pyramide = tempo_pyramid(band, geschlecht_wahl, level)
+        tl_text = "Tempolauf-Pyramide im Team-Style: " + " + ".join(f"{d} m ({tempo_intensity(d, band)})" for d in pyramide)
+        tl_pause = " / ".join("100 m Gehpause" if d >= 300 else "50 m Gehpause" for d in pyramide)
     if short_day:
         tl_pos = "nach_komplex"
         tl_text = "Kurze Antritte / Sprints nach dem Komplex; Umfang individuell, kein laktazider Laufblock"
@@ -2865,7 +3046,7 @@ def generate_unit(record, focus, te, name="Athlet"):
         day_label = FOCUS_LABELS[focus] + " · " + ("kürzere zweite Einheit" if short_day else "Schwerpunkteinheit")
     test_note = (run_reference_text(test) if test['zeit_s']
                  else "Tempolauf-Zielzeiten richten sich nach vorhandenen Tests derselben Distanz")
-    phase_label = "Phase 1: Komplextraining: Kraft und anschließende Sprünge/Sprints" if woche <= 7 else "Phase 2: Laktazide Vorab-Ermüdung" if woche <= 11 else "Phase 3: Marathon & Zuspitzung"
+    phase_label = "Komplextraining: Kraft und anschließende Sprints/Läufe"
     if short_day:
         phase_label = "Neuromuskulärer Erinnerungsreiz"
     row_gla_vorab = ""
@@ -2898,7 +3079,7 @@ def generate_unit(record, focus, te, name="Athlet"):
                      "Nach jedem Lauf 100 m Gehpause; Lohnende Pause durch Partnerwechsel"]
             row_speed_tempo = '<tr style="background:#fce4d6">' + ''.join('<td>'+escape(value)+'</td>' for value in cells) + '</tr>'
     if effective_phase in ("Grundlast", "Jumps", "Sprünge"):
-        phase_label = f"{effective_phase} · vorgesehene Phase: {planned_phase}"
+        phase_label = f"Kraftphase {PHASE_NAMES[effective_phase]} · vorgesehen: {PHASE_NAMES.get(planned_phase, planned_phase)}"
     if speed_mode and effective_phase == "Bestehender Plan":
         phase_label = "Speed and Jump · " + hurdle_plan(hurdle_config, band, te_num)["form"]
     strength_intensity = "Technisch kontrolliert" if effective_phase == "Grundlast" else "Explosiv bei sauberer Technik"
@@ -2915,10 +3096,10 @@ def generate_unit(record, focus, te, name="Athlet"):
     html_matrix = f'''<meta charset="utf-8">
     <div class="druck-block" style="background-color: #111111; color: #ffffff; border: 2px solid #45a29e; border-radius: 8px; padding: 20px; margin-top: 20px; font-family: Arial, sans-serif;">
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #66fcf1; padding-bottom: 5px;">
-    <h3 style="margin: 0; color: #66fcf1 !important;">TRAININGSMATRIX - EINHEIT: TE {woche}</h3>
+    <h3 style="margin: 0; color: #66fcf1 !important;">TRAININGSMATRIX - EINHEIT: TE {te_num}</h3>
     <span style="color: #ffb703; font-weight: bold; font-size: 14px;">{phase_label}</span>
     </div>
-    <p style="color: #ffffff !important; font-size: 14px; margin-top: 8px;"><strong>Schwerpunkt:</strong> {escape(FOCUS_LABELS[focus])} | <strong>Makrozyklus:</strong> {escape(aktuelle_daten.get("aktiver_makrozyklus", "Bestand"))} | <strong>Athlet:</strong> {escape(ziel)} ({gewicht} kg) | <strong>Woche:</strong> {week}, Einheit {day} | <strong>Ziel:</strong> {day_label} | <strong>Phase:</strong> {effective_phase} (vorgesehen: {planned_phase}) | <strong>Lauf-ABC Last:</strong> {abc_last_str}</p>
+    <p style="color: #ffffff !important; font-size: 14px; margin-top: 8px;"><strong>Schwerpunkt:</strong> {escape(FOCUS_LABELS[focus])} | <strong>Makrozyklus:</strong> {escape(aktuelle_daten.get("aktiver_makrozyklus", "Bestand"))} | <strong>Athlet:</strong> {escape(ziel)} ({gewicht} kg) | <strong>Woche:</strong> {week}, Einheit {day} | <strong>Ziel:</strong> {day_label} | <strong>Phase:</strong> {PHASE_NAMES.get(effective_phase, effective_phase)} (vorgesehen: {PHASE_NAMES.get(planned_phase, planned_phase)}) | <strong>Lauf-ABC Last:</strong> {abc_last_str}</p>
     <p>{escape(test_note)}</p>
     <p>{escape(assignment_text)}</p>
     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; color: #000000; border: 1px solid #7F7F7F;">
@@ -2950,7 +3131,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold;">Eigenständige Kraft-Hauptübung</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold;">{strength_exercise}</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">{"3" if quality_day else "3–4 (Trainerbasis)"}</td>
-    <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">{"8–6–5 Wdh." if quality_day else "8–12 Wdh. (Trainerbasis)"}</td>
+    <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">{"8–6–5 Wdh." if quality_day else rep_rule(geschlecht_wahl, level)}</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold;">{hex_text}</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">{strength_intensity}</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">{pause_komplex}</td>
@@ -2968,7 +3149,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold;">Komplex: Bälle</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">Umsatz / Ausstoß-Jumps & Crunches</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">3</td>
-    <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">{"5–8 Wdh." if quality_day else "12–15 Wdh. (Trainerbasis)"}</td>
+    <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">{"5–8 Wdh." if quality_day else rep_rule(geschlecht_wahl, level)}</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">Griffball {gb_last_kg} kg</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9;">Max. Schnellkraft</td>
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">60s</td>

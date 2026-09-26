@@ -93,8 +93,7 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 .st-key-login_screen p {font-size:clamp(.85rem,2.1vw,1.05rem) !important;margin:0 !important;max-width:34rem}
 .st-key-login_screen [data-testid="stTextInput"],
 .st-key-login_screen [data-testid="stButton"] {width:min(90vw,320px) !important;margin:0 auto !important}
-.st-key-login_overview img {width:100% !important;height:auto !important;border-radius:12px}
-.st-key-login_logo img {width:100% !important;height:auto !important;max-width:260px !important}
+.st-key-login_overview img {border-radius:12px}
 .st-key-login_form {display:flex !important;flex-direction:column !important;align-items:center !important;gap:.4rem !important;margin-top:1rem !important}
 @media (max-width:680px){.st-key-login_overview{display:none !important}
     [data-testid="stHorizontalBlock"]:has(.st-key-login_overview) [data-testid="column"]:has(.st-key-login_overview){display:none !important}}
@@ -109,11 +108,13 @@ table {border-collapse:collapse} td,th {padding:6px;border:1px solid #aaa}
     .druck-block h3,.druck-block p,.druck-block span {color:#111 !important}
 }
 </style>""",unsafe_allow_html=True)
-def lade_bild(dateinamen_liste, use_col=False):
+def lade_bild(dateinamen_liste, use_col=False, breite=None):
+    # Frank Müller, 26.09.2026: feste Pixelbreite (breite=…) statt Prozent/"stretch" —
+    # dadurch unabhängig von der tatsächlichen Spaltenbreite, immer gleich groß.
     for name in dateinamen_liste:
         if os.path.exists(name):
             if use_col:
-                st.image(name, width="stretch")
+                st.image(name, width=breite if breite is not None else "stretch")
             return True
     return False
 def setting(name):
@@ -143,7 +144,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Übersichtsbild groß links, Logo und Zugangseingabe rechts daneben'
+BUILD_STAND = '26.09.2026 · Anmeldebildschirm: feste Pixelgrößen für Übersicht (520px) und Logo (180px) statt Prozentangaben'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -3256,10 +3257,10 @@ if st.session_state.auth_modus is None:
         overview_col, form_col = st.columns([3, 2], vertical_alignment="top")
         with overview_col:
             with st.container(key='login_overview'):
-                lade_bild(["uebersicht.png"], use_col=True)
+                lade_bild(["uebersicht.png"], use_col=True, breite=520)  # groß und lesbar
         with form_col:
             with st.container(key='login_logo'):
-                lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True)
+                lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True, breite=180)  # Höhe + Formular ≈ Höhe der Übersicht
             with st.container(key='login_form'):
                 st.markdown("<p>Bitte Zugriffscode eingeben (Fußball 1 – Komplextraining / Fußball 2 – Speed and Jump)</p>", unsafe_allow_html=True)
                 eingabe_code = st.text_input("Zugriffscode", type="password", label_visibility="collapsed", placeholder="Zugriffscode")

@@ -82,7 +82,7 @@ def abc_rows_115(band, gender, week, progression, start=None):
     rows = []
     for name in ("Kniehebelauf", "Anfersen", "Seitlicher Nachstellschritt", "Hopserlauf"):
         direction = "; je einmal in beide Richtungen" if name == "Seitlicher Nachstellschritt" else ""
-        rows.append(["Block 1: ABC", name, "2 Bahnen insgesamt" + direction,
+        rows.append(["Block 1: ABC", name, "2 Serien insgesamt" + direction,
                      f"Je {distance:g} m hin + {distance:g} m Beschleunigung zurück; {4*distance:g} m insgesamt",
                      equipment, "Kontrollierter Geschwindigkeitsaufbau auf dem Rückweg", PARTNER_PAUSE])
     return rows

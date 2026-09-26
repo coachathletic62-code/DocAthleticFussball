@@ -105,7 +105,7 @@ def voice_number_input(label, min_value=None, max_value=None, value='min', step=
     initial=initial.replace('.',',')
     text_key='zahl_'+str(key) if key is not None else None
     raw=target.text_input(label, value=initial, key=text_key, help=help,
-                          disabled=disabled, **{k:v for k,v in kwargs.items() if k in ('label_visibility','placeholder')})
+                          disabled=disabled, **{k:v for k,v in kwargs.items() if k in ('label_visibility','placeholder','width')})
     try:
         return parse_number(raw,min_value,max_value,integer,allow_empty=value is None)
     except ValueError as exc:

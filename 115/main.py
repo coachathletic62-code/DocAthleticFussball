@@ -92,9 +92,10 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 .st-key-login_screen img {max-width:100% !important;height:auto !important}  # Frank Müller, 26.09.2026: alte 220px-Deckelung entfernt
 .st-key-login_screen p {font-size:clamp(.85rem,2.1vw,1.05rem) !important;margin:0 !important;max-width:34rem}
 .st-key-login_screen [data-testid="stTextInput"],
-.st-key-login_screen [data-testid="stButton"] {width:min(90vw,320px) !important;margin:0 auto !important}
+.st-key-login_screen [data-testid="stButton"] {width:min(90vw,260px) !important;margin:0 auto !important}  # Frank Müller, 26.09.2026: schmaler, passend zum Logo
 .st-key-login_overview img {border-radius:12px}
-.st-key-login_form {display:flex !important;flex-direction:column !important;align-items:center !important;gap:.4rem !important;margin-top:1rem !important}
+.st-key-login_logo {display:flex !important;justify-content:center !important}
+.st-key-login_form {display:flex !important;flex-direction:column !important;align-items:center !important;gap:1.1rem !important;margin-top:2.6rem !important}  # Frank Müller, 26.09.2026: mehr Abstand, tiefer gerückt
 @media (max-width:680px){.st-key-login_overview{display:none !important}
     [data-testid="stHorizontalBlock"]:has(.st-key-login_overview) [data-testid="column"]:has(.st-key-login_overview){display:none !important}}
 [data-testid="stMainBlockContainer"]:has(.st-key-login_screen) {padding-top:clamp(.5rem,2vh,2rem) !important;padding-bottom:clamp(.5rem,2vh,2rem) !important}
@@ -144,7 +145,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Fehler behoben: alte 220px-Bilddeckelung entfernt; Übersicht in Originalgröße, Logo größer'
+BUILD_STAND = '26.09.2026 · Anmeldebildschirm: mehr Abstand zwischen Hinweistext und Eingabefeld, Block tiefer gesetzt'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (

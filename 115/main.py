@@ -85,6 +85,15 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stDownloadButton"] button * {color:#111 !important;font-weight:700}
 [data-testid="stRadio"] label {background:#1f2833;border:1px solid #45a29e;border-radius:8px;padding:8px 14px}
 [data-testid="stExpander"] details > summary {background:#17191c !important;color:#fff !important}
+.st-key-login_screen {
+    display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    gap:clamp(.6rem,2.2vh,1.4rem);min-height:calc(100dvh - 2rem);width:100%;
+}
+.st-key-login_screen img {max-width:min(50vw,220px) !important;height:auto !important}
+.st-key-login_screen p {font-size:clamp(.85rem,2.1vw,1.05rem) !important;margin:0 !important;max-width:34rem}
+.st-key-login_screen [data-testid="stTextInput"],
+.st-key-login_screen [data-testid="stButton"] {width:min(90vw,320px) !important;margin:0 auto !important}
+[data-testid="stMainBlockContainer"]:has(.st-key-login_screen) {padding-top:clamp(.5rem,2vh,2rem) !important;padding-bottom:clamp(.5rem,2vh,2rem) !important}
 [data-testid="stExpander"] details > summary * {color:#fff !important}
 [data-testid="stVerticalBlockBorderWrapper"] > div {border-color:#45a29e !important}
 table {border-collapse:collapse} td,th {padding:6px;border:1px solid #aaa}
@@ -129,7 +138,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '25.09.2026 · Stufe 1: 16 Einheiten, Kraftphasen Stand–Jumps–Sprünge, Tempolauf-Pyramiden, Retest, Empfehlungen für den Folgezyklus'
+BUILD_STAND = '25.09.2026 · Anmeldebildschirm überarbeitet: passt sich ohne Scrollen an, Speicherhinweis erst nach dem Login'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -3182,8 +3191,6 @@ def generate_unit(record, focus, te, name="Athlet"):
     html_matrix = organize_multisport_html(html_matrix, einheiten, short_day, main_sets, "Fussball", band, org_config, timing, focus, block_rounds)
     return html_matrix
 
-st.title('Doc Athletic Train Smart Evolution Software')
-st.caption('Fußball 120 · '+BUILD_STAND)
 auth_fingerprint = hashlib.sha256(json.dumps([TRAINER_CODE,GAST_CODE,DATABASE_URL]).encode()).hexdigest()
 if st.session_state.get("auth_fingerprint") != auth_fingerprint:
     st.session_state.clear()
@@ -3191,31 +3198,33 @@ if st.session_state.get("auth_fingerprint") != auth_fingerprint:
 if not TRAINER_CODE:
     st.info("Trainerzugang einrichten: In den Streamlit-Einstellungen unter Secrets den Eintrag DOC_ATHLETIC_TRAINER_CODE mit einem eigenen Zugangscode speichern. Danach die App neu laden.")
     st.stop()
+if 'auth_modus' not in st.session_state:
+    st.session_state.auth_modus = None
+if st.session_state.auth_modus is None:
+    # Frank Müller, 25.09.2026: Anmeldebildschirm bewusst schlank — ein zentrierter
+    # Block, der ohne Scrollen auf Handy, Tablet und Notebook passt. Titel, Stand
+    # und Speicherhinweis erscheinen erst danach, in der eigentlichen App.
+    with st.container(key='login_screen'):
+        lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True)
+        st.markdown("<p>Bitte Zugriffscode eingeben (Fußball 1 – Komplextraining / Fußball 2 – Speed and Jump)</p>", unsafe_allow_html=True)
+        eingabe_code = st.text_input("Zugriffscode", type="password", label_visibility="collapsed", placeholder="Zugriffscode")
+        if st.button("ZUGRIFF BESTÄTIGEN"):
+            if TRAINER_CODE and hmac.compare_digest(eingabe_code.encode(), TRAINER_CODE.encode()):
+                st.session_state.auth_modus = "trainer"
+                st.rerun()
+            elif GAST_CODE and hmac.compare_digest(eingabe_code.encode(), GAST_CODE.encode()):
+                st.session_state.auth_modus = "gast"
+                st.rerun()
+            else:
+                st.error("Ungültiger Code. Bitte prüfen.")
+            st.stop()
+    st.stop()
+st.title('Doc Athletic Train Smart Evolution Software')
+st.caption('Fußball 120 · '+BUILD_STAND)
 if DATABASE_URL:
     st.caption("Speicher: externe PostgreSQL-Datenbank")
 else:
     st.warning("Speicher lokal, nicht dauerhaft garantiert: Nach der Arbeit unter Datensicherung ein Backup herunterladen. Externe Datenbank noch einrichten.")
-if 'auth_modus' not in st.session_state:
-    st.session_state.auth_modus = None
-if st.session_state.auth_modus is None:
-    col_11, col_12, col_13 = st.columns([1, 2, 1])
-    with col_12:
-        lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True)
-        st.markdown("<p style='text-align: center; color: #c5c6c7; margin-top: 20px;'>Bitte Zugriffscode eingeben (Fußball 1 – Komplextraining / Fußball 2 – Speed and Jump)</p>", unsafe_allow_html=True)
-        col_p1, col_p2, col_p3 = st.columns([1, 2, 1])
-        with col_p2:
-            eingabe_code = st.text_input("Zugriffscode", type="password")
-            if st.button("ZUGRIFF BESTÄTIGEN"):
-                if TRAINER_CODE and hmac.compare_digest(eingabe_code.encode(), TRAINER_CODE.encode()):
-                    st.session_state.auth_modus = "trainer"
-                    st.rerun()
-                elif GAST_CODE and hmac.compare_digest(eingabe_code.encode(), GAST_CODE.encode()):
-                    st.session_state.auth_modus = "gast"
-                    st.rerun()
-                else:
-                    st.error("Ungültiger Code. Bitte prüfen.")
-                st.stop()
-    st.stop()
 if 'navigations_status' not in st.session_state:
     st.session_state.navigations_status = 'Operativ'
 if 'kader_db' not in st.session_state:

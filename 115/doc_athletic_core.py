@@ -75,14 +75,17 @@ def abc_values(band, gender, week, progression, start=None):
     distance = min(cap, initial + (max(0, week - 1) * 2 if progression else 0))
     return distance, load
 
+# Frank Müller, 25.09.2026: gleiche Kennzeichnung wie bei der Erwärmung (main.py).
+WARMUP_CHOICE_NOTE = " · Wahlübung: variable Spielformen gemäß Vorgabe (Trainer-Veto)"
 def abc_rows_115(band, gender, week, progression, start=None):
     distance, load = abc_values(band, gender, week, progression, start)
     equipment = ("Ohne Stange" if load == "0" else
                  f"Stange {load} kg gesamt; Arme gestreckt über Kopf, Griffbreite ca. 1,5 × Schulterbreite; auch beim Rückweg")
+    block_label = "Block 1: ABC" + (WARMUP_CHOICE_NOTE if band in ("U11", "U13", "U15") else "")
     rows = []
     for name in ("Kniehebelauf", "Anfersen", "Seitlicher Nachstellschritt", "Hopserlauf"):
         direction = "; je einmal in beide Richtungen" if name == "Seitlicher Nachstellschritt" else ""
-        rows.append(["Block 1: ABC", name, "2 Serien insgesamt" + direction,
+        rows.append([block_label, name, "2 Serien insgesamt" + direction,
                      f"Je {distance:g} m hin + {distance:g} m Beschleunigung zurück; {4*distance:g} m insgesamt",
                      equipment, "Kontrollierter Geschwindigkeitsaufbau auf dem Rückweg", PARTNER_PAUSE])
     return rows
@@ -231,9 +234,9 @@ def kreuzheben_load(band, last):
 
 def cheer_load(band, gender):
     if gender != "Weiblich":
-        return {"U11":"1 kg je Hand","U13":"2 kg je Hand","U15":"4 kg je Hand","U17":"6 kg je Hand","U20":"8 kg je Hand","U23":"8 kg je Hand","MASTER":"8 kg je Hand"}[band]
+        return {"U11":"1 kg je Hand","U13":"2 kg je Hand","U15":"4 kg je Hand","U17":"4–6 kg je Hand","U20":"8 kg je Hand","U23":"8 kg je Hand","MASTER":"8 kg je Hand"}[band]  # U17 Frank 25.09.2026
     return {"U11":"1 kg je Hand", "U13":"2 kg je Hand", "U15":"3 kg je Hand",
-            "U17":"4 kg je Hand", "U20":"4–6 kg je Hand"}.get(band, "Zusatzlast im Sollplan anhand der dokumentierten Einheit eintragen")
+            "U17":"3–4 kg je Hand", "U20":"4–6 kg je Hand"}.get(band, "Zusatzlast im Sollplan anhand der dokumentierten Einheit eintragen")  # U17 Frank 25.09.2026
 
 def profile_age(profile):
     band = profile.split("_")[1]

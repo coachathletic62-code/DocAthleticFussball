@@ -138,7 +138,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '25.09.2026 · Anmeldebildschirm überarbeitet: passt sich ohne Scrollen an, Speicherhinweis erst nach dem Login'
+BUILD_STAND = '25.09.2026 · Speicherhinweis dezent statt ganzseitiger Warnkasten; Anmeldebildschirm responsiv'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -3224,7 +3224,12 @@ st.caption('Fußball 120 · '+BUILD_STAND)
 if DATABASE_URL:
     st.caption("Speicher: externe PostgreSQL-Datenbank")
 else:
-    st.warning("Speicher lokal, nicht dauerhaft garantiert: Nach der Arbeit unter Datensicherung ein Backup herunterladen. Externe Datenbank noch einrichten.")
+    # Frank Müller, 25.09.2026: dezenter Hinweis statt ganzseitigem Warnkasten —
+    # zwei kurze Zeilen, fett, farbig, ohne Hintergrundfläche.
+    st.markdown(
+        "<p style='margin:.1rem 0 .8rem;font-weight:700;font-size:.85rem;line-height:1.35;color:#ffb703'>"
+        "Speicher lokal, kein Dauerspeicher.<br>Nach der Arbeit unter Datensicherung ein Backup herunterladen.</p>",
+        unsafe_allow_html=True)
 if 'navigations_status' not in st.session_state:
     st.session_state.navigations_status = 'Operativ'
 if 'kader_db' not in st.session_state:

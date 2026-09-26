@@ -93,7 +93,10 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 .st-key-login_screen p {font-size:clamp(.85rem,2.1vw,1.05rem) !important;margin:0 !important;max-width:34rem}
 .st-key-login_screen [data-testid="stTextInput"],
 .st-key-login_screen [data-testid="stButton"] {width:min(90vw,320px) !important;margin:0 auto !important}
-.st-key-login_overview img {max-width:min(70vw,560px) !important;height:auto !important;border-radius:12px}
+.st-key-login_row {display:flex !important;align-items:center !important;justify-content:center !important;gap:clamp(.75rem,3vw,2rem) !important}
+.st-key-login_screen img {max-width:100% !important}
+.st-key-login_logo img {max-height:14vh !important;width:auto !important}
+.st-key-login_overview img {max-height:28vh !important;width:auto !important;border-radius:12px}
 @media (max-width:680px){.st-key-login_overview{display:none !important}}
 [data-testid="stMainBlockContainer"]:has(.st-key-login_screen) {padding-top:clamp(.5rem,2vh,2rem) !important;padding-bottom:clamp(.5rem,2vh,2rem) !important}
 [data-testid="stExpander"] details > summary * {color:#fff !important}
@@ -140,7 +143,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Titelbild-Suche vereinfacht auf eine Datei: uebersicht.png'
+BUILD_STAND = '26.09.2026 · Logo und Titelbild nebeneinander statt übereinander, Höhe begrenzt, ohne Scrollen'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -3247,11 +3250,14 @@ if st.session_state.auth_modus is None:
     # Block, der ohne Scrollen auf Handy, Tablet und Notebook passt. Titel, Stand
     # und Speicherhinweis erscheinen erst danach, in der eigentlichen App.
     with st.container(key='login_screen'):
-        lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True)
-        with st.container(key='login_overview'):
-            # Frank Müller, 26.09.2026: Titelbild nur ab Tablet-Breite (siehe CSS oben) —
-            # auf dem Handy bleibt der Anmeldebildschirm ohne Scrollen.
-            lade_bild(["uebersicht.png"], use_col=True)  # Frank Müller, 26.09.2026: nur noch eine Datei
+        # Frank Müller, 26.09.2026: Logo und Titelbild nebeneinander statt übereinander,
+        # damit die Gesamthöhe für einen Bildschirm ohne Scrollen reicht. Auf dem Handy
+        # blendet die CSS-Regel oben das Titelbild aus, dann steht nur das Logo.
+        with st.container(key='login_row'):
+            with st.container(key='login_logo'):
+                lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True)
+            with st.container(key='login_overview'):
+                lade_bild(["uebersicht.png"], use_col=True)
         st.markdown("<p>Bitte Zugriffscode eingeben (Fußball 1 – Komplextraining / Fußball 2 – Speed and Jump)</p>", unsafe_allow_html=True)
         eingabe_code = st.text_input("Zugriffscode", type="password", label_visibility="collapsed", placeholder="Zugriffscode")
         if st.button("ZUGRIFF BESTÄTIGEN"):

@@ -91,13 +91,6 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stTextInput"],
 [data-testid="stNumberInput"],
 [data-testid="stSelectbox"] {max-width:420px !important}
-/* Frank Müller, 26.09.2026: Felder in mehrspaltigen Zeilen (Alter, Körpergröße,
-   Athletentyp, Athlet, Einheiten im Halbjahr, Trainingseinheit u. Ä.) nochmals
-   rund 30 % schmaler als die allgemeine Grenze oben. Profilnotiz steht in keiner
-   Spalte und bleibt deshalb bei der breiteren Größe. */
-[data-testid="column"] [data-testid="stTextInput"],
-[data-testid="column"] [data-testid="stNumberInput"],
-[data-testid="column"] [data-testid="stSelectbox"] {max-width:300px !important}
 /* Anmeldebildschirm (Frank Müller, 26.09.2026) */
 .st-key-login_screen {
     display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
@@ -161,7 +154,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Felder in mehrspaltigen Zeilen (Alter, Athlet, Trainingseinheit u.a.) rund 30 % schmaler'
+BUILD_STAND = '26.09.2026 · Athlet, Trainingseinheit, Alter, Größe u.a. mit fester Feldbreite statt CSS-Vermutung'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -2427,7 +2420,7 @@ def select_person(page, allow_new=False):
     current=st.session_state.get('active_athlete')
     labels={value:roster_label(json.loads(value),st.session_state.kader_db) for value in choices}
     labels['__new__']='Neuen Athleten anlegen'
-    selected=st.selectbox('Athlet',options,index=options.index(current) if current in options else 0,
+    selected=st.selectbox('Athlet',options,width=280,index=options.index(current) if current in options else 0,
                          format_func=labels.get,
                          key=page+'_person_'+str(st.session_state.get('edit_epoch',0)))
     if selected=='__new__':
@@ -2449,24 +2442,24 @@ def render_athlete_editor(selection=None,unit=None):
     name=old_name if inline and old else st.text_input('Name',old_name or '',key=key('name'),disabled=guest or old is not None).strip()
     personal,measurements,development_column,references=st.columns(4)
     with personal:
-        age=voice_number_input('Alter (Jahre)',9,40,record['alter'],key=key('age'),disabled=guest)
-        gender=st.selectbox('Geschlecht',['Männlich','Weiblich'],index=int(record.get('geschlecht','Weiblich' if record.get('profil','').endswith('_w') else 'Männlich')=='Weiblich'),key=key('gender'),disabled=guest)
+        age=voice_number_input('Alter (Jahre)',9,40,record['alter'],key=key('age'),disabled=guest,width=280)
+        gender=st.selectbox('Geschlecht',['Männlich','Weiblich'],width=280,index=int(record.get('geschlecht','Weiblich' if record.get('profil','').endswith('_w') else 'Männlich')=='Weiblich'),key=key('gender'),disabled=guest)
     with measurements:
-        height=voice_number_input('Körpergröße (m)',1.3,2.15,record['groesse'],key=key('height'),disabled=guest)
-        weight=voice_number_input('Körpergewicht (kg)',30.,140.,record['gewicht'],key=key('weight'),disabled=guest)
+        height=voice_number_input('Körpergröße (m)',1.3,2.15,record['groesse'],key=key('height'),disabled=guest,width=280)
+        weight=voice_number_input('Körpergewicht (kg)',30.,140.,record['gewicht'],key=key('weight'),disabled=guest,width=280)
     with development_column:
         kinds=['Ausdauer','Kraft','Sprungkraft','Gazelle','Schnelligkeit (Sprint)']
-        kind=st.selectbox('Athletentyp',kinds,index=kinds.index(record['fasertyp']),key=key('type'),disabled=guest)
+        kind=st.selectbox('Athletentyp',kinds,width=280,index=kinds.index(record['fasertyp']),key=key('type'),disabled=guest)
         calendar=(record.get('kalenderklasse',calendar_band(age)) if old and age==old['alter'] else calendar_band(age)) if age is not None else None
         development=record['reife']
         if calendar and calendar!='U11':
             options=['Spätentwickler (Retardiert)','Normalentwickler','Frühentwickler (Akzeleriert)']
-            development=st.selectbox('Entwicklungsstatus',options,index=options.index(development),key=key('development'),disabled=guest)
+            development=st.selectbox('Entwicklungsstatus',options,width=280,index=options.index(development),key=key('development'),disabled=guest)
         elif calendar=='U11':
             st.caption('U11: regulärer Plan ohne entwicklungsabhängige Verschiebung.')
     with references:
-        frequency=st.selectbox('Einheiten pro Woche',[1,2],index=int(record.get('planung',{}).get('einheiten',1))-1,key=key('frequency'),disabled=guest)
-        t60=voice_number_input('60m-Referenz (s; falls vorhanden)',6.,15.,record.get('t_60'),key=key('t60'),disabled=guest)
+        frequency=st.selectbox('Einheiten pro Woche',[1,2],width=280,index=int(record.get('planung',{}).get('einheiten',1))-1,key=key('frequency'),disabled=guest)
+        t60=voice_number_input('60m-Referenz (s; falls vorhanden)',6.,15.,record.get('t_60'),key=key('t60'),disabled=guest,width=280)
     notes=st.text_input('Profilnotiz (optional)',record.get('notizen',''),max_chars=4000,key=key('notes'),disabled=guest)
     cfg=record.get('trainingszuordnung',{})
     same=old and calendar==record.get('kalenderklasse',calendar_band(old['alter'])) and development==record['reife'] and gender==record.get('geschlecht',gender)
@@ -2656,7 +2649,7 @@ def render_training():
     band=record['profil'].split('_')[1]
     cfg,total,units_now=cycle_plan(record,focus,band)
     with unit_column:
-        chosen_units=st.selectbox('Einheiten im Halbjahr',CYCLE_UNIT_CHOICES,index=CYCLE_UNIT_CHOICES.index(units_now),
+        chosen_units=st.selectbox('Einheiten im Halbjahr',CYCLE_UNIT_CHOICES,width=280,index=CYCLE_UNIT_CHOICES.index(units_now),
             key=widget_key('cycle_units',sport,focus,name),disabled=guest,
             help='Standard 16. Die letzte Einheit ist immer der Retest für den Jahresvergleich.')
     if chosen_units!=units_now and not guest:
@@ -2666,7 +2659,7 @@ def render_training():
                     if item.get('cycle')==cycle and item.get('schwerpunkt',legacy_focus(record))==focus}
     options=sorted(set(range(1,total+1))|archived_units)
     with unit_column:
-        te=st.selectbox('Trainingseinheit (TE)',options,format_func=lambda n:f'TE {n} · Retest' if n==units_now else f'TE {n}',key='training_te')
+        te=st.selectbox('Trainingseinheit (TE)',options,width=280,format_func=lambda n:f'TE {n} · Retest' if n==units_now else f'TE {n}',key='training_te')
     with st.container(border=True):
         render_athlete_editor(selection,(cycle,te,focus))
     saved=record.get('einheitenprotokoll',{}).get(focus_unit_key(record,cycle,te,focus))

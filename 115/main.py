@@ -85,6 +85,12 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stDownloadButton"] button * {color:#111 !important;font-weight:700}
 [data-testid="stRadio"] label {background:#1f2833;border:1px solid #45a29e;border-radius:8px;padding:8px 14px}
 [data-testid="stExpander"] details > summary {background:#17191c !important;color:#fff !important}
+/* Frank Müller, 26.09.2026: einzeilige Eingabefelder wie „Profilnotiz“ nicht über
+   die ganze Breite ziehen lassen, sondern auf normale Feldgröße begrenzen.
+   Mehrzeilige Textfelder (Sollplan, Anmerkungen) bleiben bewusst ausgenommen. */
+[data-testid="stTextInput"],
+[data-testid="stNumberInput"],
+[data-testid="stSelectbox"] {max-width:420px !important}
 /* Anmeldebildschirm (Frank Müller, 26.09.2026) */
 .st-key-login_screen {
     display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
@@ -148,7 +154,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Anmeldebildschirm: Logo entfernt, Zugangstext neu mit Zeilenabständen'
+BUILD_STAND = '26.09.2026 · Einzeilige Eingabefelder app-weit auf normale Größe begrenzt (z. B. Profilnotiz)'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (

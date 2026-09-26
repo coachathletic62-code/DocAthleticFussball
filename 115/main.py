@@ -95,7 +95,9 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 .st-key-login_screen [data-testid="stTextInput"],
 .st-key-login_screen [data-testid="stButton"] {width:min(90vw,260px) !important;margin:0 auto !important}
 .st-key-login_overview img {border-radius:12px}
-.st-key-login_logo {display:flex !important;justify-content:center !important}
+.st-key-login_form p:nth-of-type(1) {margin:0 0 2.4em 0 !important}
+.st-key-login_form p:nth-of-type(2) {margin:0 0 2.4em 0 !important}
+.st-key-login_form p:nth-of-type(3) {margin:0 0 3.6em 0 !important}
 .st-key-login_form {display:flex !important;flex-direction:column !important;align-items:center !important;gap:1.1rem !important;margin-top:2.6rem !important}
 @media (max-width:680px){.st-key-login_overview{display:none !important}
     [data-testid="stHorizontalBlock"]:has(.st-key-login_overview) [data-testid="column"]:has(.st-key-login_overview){display:none !important}}
@@ -146,7 +148,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Code-Prüfung: 2 Fehler behoben, ~150 Zeilen Ballast entfernt; Cheerleading/Beinbeuger bis 25 je Seite'
+BUILD_STAND = '26.09.2026 · Anmeldebildschirm: Logo entfernt, Zugangstext neu mit Zeilenabständen'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -3111,10 +3113,12 @@ if st.session_state.auth_modus is None:
             with st.container(key='login_overview'):
                 lade_bild(["uebersicht.png"], use_col=True, breite="content")  # echte Originalgröße (1211×864), nur bei Platzmangel verkleinert
         with form_col:
-            with st.container(key='login_logo'):
-                lade_bild(["logo.png", "logo.png.png", "logo"], use_col=True, breite=230)  # etwas größer als zuvor
             with st.container(key='login_form'):
-                st.markdown("<p>Bitte Zugriffscode eingeben (Fußball 1 – Komplextraining / Fußball 2 – Speed and Jump)</p>", unsafe_allow_html=True)
+                st.markdown(
+                    "<p>Bitte Zugriffscode eingeben:</p>"
+                    "<p>Fußball 1 - Komplextraining</p>"
+                    "<p>Fußball 2 - Speed and Jump</p>",
+                    unsafe_allow_html=True)
                 eingabe_code = st.text_input("Zugriffscode", type="password", label_visibility="collapsed", placeholder="Zugriffscode")
                 if st.button("ZUGRIFF BESTÄTIGEN"):
                     if TRAINER_CODE and hmac.compare_digest(eingabe_code.encode(), TRAINER_CODE.encode()):

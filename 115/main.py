@@ -91,6 +91,13 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stTextInput"],
 [data-testid="stNumberInput"],
 [data-testid="stSelectbox"] {max-width:420px !important}
+/* Frank Müller, 26.09.2026: Felder in mehrspaltigen Zeilen (Alter, Körpergröße,
+   Athletentyp, Athlet, Einheiten im Halbjahr, Trainingseinheit u. Ä.) nochmals
+   rund 30 % schmaler als die allgemeine Grenze oben. Profilnotiz steht in keiner
+   Spalte und bleibt deshalb bei der breiteren Größe. */
+[data-testid="column"] [data-testid="stTextInput"],
+[data-testid="column"] [data-testid="stNumberInput"],
+[data-testid="column"] [data-testid="stSelectbox"] {max-width:300px !important}
 /* Anmeldebildschirm (Frank Müller, 26.09.2026) */
 .st-key-login_screen {
     display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
@@ -154,7 +161,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Einzeilige Eingabefelder app-weit auf normale Größe begrenzt (z. B. Profilnotiz)'
+BUILD_STAND = '26.09.2026 · Felder in mehrspaltigen Zeilen (Alter, Athlet, Trainingseinheit u.a.) rund 30 % schmaler'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (

@@ -8,7 +8,7 @@ import streamlit as st
 from doc_athletic_input import voice_number_input
 from doc_athletic_core import (PARTNER_PAUSE, abc_rows_115, build_tempo_table, phase_defaults, phase_validate, phase_status, phase_exercise_label, weekly_reps, unit_context, kreuzheben_load, cheer_load, profile_age, age_matches_profile, powerbag_load)
 from doc_athletic_storage import (StorageConfig, StorageConflict, StorageError, load_state, save_state, export_backup, decode_backup)
-from doc_athletic_core import AGE_BANDS, ASSIGNMENT_RULE, calendar_band, training_assignment, validate_assignment
+from doc_athletic_core import AGE_BANDS, ASSIGNMENT_RULE, calendar_band, training_assignment, validate_assignment, WARMUP_CHOICE_NOTE
 import pandas as pd
 import os
 import json
@@ -85,17 +85,18 @@ h2 {font-size:1.4rem !important;color:#66fcf1 !important}
 [data-testid="stDownloadButton"] button * {color:#111 !important;font-weight:700}
 [data-testid="stRadio"] label {background:#1f2833;border:1px solid #45a29e;border-radius:8px;padding:8px 14px}
 [data-testid="stExpander"] details > summary {background:#17191c !important;color:#fff !important}
+/* Anmeldebildschirm (Frank Müller, 26.09.2026) */
 .st-key-login_screen {
     display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
     gap:clamp(.6rem,2.2vh,1.4rem);min-height:calc(100dvh - 2rem);width:100%;
 }
-.st-key-login_screen img {max-width:100% !important;height:auto !important}  # Frank Müller, 26.09.2026: alte 220px-Deckelung entfernt
+.st-key-login_screen img {max-width:100% !important;height:auto !important}
 .st-key-login_screen p {font-size:clamp(.85rem,2.1vw,1.05rem) !important;margin:0 !important;max-width:34rem}
 .st-key-login_screen [data-testid="stTextInput"],
-.st-key-login_screen [data-testid="stButton"] {width:min(90vw,260px) !important;margin:0 auto !important}  # Frank Müller, 26.09.2026: schmaler, passend zum Logo
+.st-key-login_screen [data-testid="stButton"] {width:min(90vw,260px) !important;margin:0 auto !important}
 .st-key-login_overview img {border-radius:12px}
 .st-key-login_logo {display:flex !important;justify-content:center !important}
-.st-key-login_form {display:flex !important;flex-direction:column !important;align-items:center !important;gap:1.1rem !important;margin-top:2.6rem !important}  # Frank Müller, 26.09.2026: mehr Abstand, tiefer gerückt
+.st-key-login_form {display:flex !important;flex-direction:column !important;align-items:center !important;gap:1.1rem !important;margin-top:2.6rem !important}
 @media (max-width:680px){.st-key-login_overview{display:none !important}
     [data-testid="stHorizontalBlock"]:has(.st-key-login_overview) [data-testid="column"]:has(.st-key-login_overview){display:none !important}}
 [data-testid="stMainBlockContainer"]:has(.st-key-login_screen) {padding-top:clamp(.5rem,2vh,2rem) !important;padding-bottom:clamp(.5rem,2vh,2rem) !important}
@@ -145,7 +146,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Anmeldebildschirm: mehr Abstand zwischen Hinweistext und Eingabefeld, Block tiefer gesetzt'
+BUILD_STAND = '26.09.2026 · Code-Prüfung: 2 Fehler behoben, ~150 Zeilen Ballast entfernt; Cheerleading/Beinbeuger bis 25 je Seite'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -156,10 +157,6 @@ HURDLE_FORMS = ("M-Hürdensprints", "Hürden-Steigesprünge", "Hürden-Tiefsprü
 M_HURDLE_EDGES = {"U11": (12., 15.), "U13": (15., 18.), "U15": (15., 20.),
                   "U17": (17., 20.), "U20": (20., 25.), "U23": (20., 28.), "MASTER": (20., 28.)}
 M_HURDLE_HEIGHTS = {"U11": 25, "U13": 30, "U15": 38, "U17": 45, "U20": 45, "U23": 45, "MASTER": 45}
-U11_DUMBBELLS = {"Cheerleading": 1, "Umsatz-/Ausstoßsprünge auf der Stelle": 1,
-                 "Squat-/Stoßsprünge": 1, "Candle Jumps": 1, "Burpees mit Kurzhanteln": 1,
-                 "Burpees ohne Kurzhanteln": 0, "Kreuzhebesprünge auf der Stelle": 2,
-                 "Front Squat Jumps": 2}
 def hurdle_defaults():
     return {"forms": [HURDLE_FORMS[i % 3] for i in range(28)], "overrides": {}}
 def hurdle_plan(config, band, te):
@@ -379,10 +376,13 @@ def rep_rule(gender, level):
 # Geschlecht fest bei 10 (einbeinig/je Arm) bzw. 15 (beidbeinig). Übertrifft der Athlet
 # das rechnerische Niveau, wird die dokumentierte Ist-Leistung (plus eine Wiederholung)
 # ab sofort die neue Grundlage — kein zusätzliches Eingabefeld nötig.
-def carried_reps(record, cycle, focus, exercise_name):
+def carried_reps(record, cycle, focus, exercise_name, before_te):
+    """Nur Einheiten VOR der angezeigten Einheit zählen, nie spätere."""
     best = None
     for item in record.get("einheitenprotokoll", {}).values():
         if item.get("cycle") != cycle or item.get("schwerpunkt", legacy_focus(record)) != focus:
+            continue
+        if item.get("te", 0) >= before_te:
             continue
         for row in item.get("actual", []):
             if row.get("Übung", "").strip() == exercise_name:
@@ -390,14 +390,16 @@ def carried_reps(record, cycle, focus, exercise_name):
                 if value is not None and (best is None or value > best):
                     best = value
     return None if best is None else int(best) + 1
-def progressive_reps(record, cycle, focus, exercise_name, gender, level, start):
-    cap = 20 if gender == "Weiblich" else 15
+# Frank Müller, 26.09.2026: Cheerleading und Beinbeuger unabhängig von Alter und
+# Geschlecht bis 25 je Seite (Cheerleading 2 × 25 = 50) bzw. 25 beidbeinig; danach
+# steigt die Last (Cheerleading +1 kg je Hand, Beinbeuger straffere Einstellung).
+def progressive_reps(record, cycle, focus, exercise_name, te, level, start, cap, next_step):
     formula = start + max(0, level - 1)
-    carried = carried_reps(record, cycle, focus, exercise_name)
+    carried = carried_reps(record, cycle, focus, exercise_name, te)
     reps = max(formula, carried) if carried is not None else formula
     if reps <= cap:
         return reps, f"{reps} Wdh."
-    return cap, f"{cap} Wdh. · Obergrenze erreicht: nächste Laststufe nach Tonnage-Regel (Trainer)"
+    return cap, f"{cap} Wdh. · Obergrenze erreicht: {next_step}"
 # Tempolauf-Pyramiden: Start in TE 1, dann +50 m je Einheit (U13: +25 m) bis zur Obergrenze.
 TEMPO_START = {("U13", "Männlich"): [100, 100, 50], ("U13", "Weiblich"): [100, 100, 50],
                ("U15", "Männlich"): [250, 200, 150], ("U15", "Weiblich"): [250, 200, 150],
@@ -459,14 +461,6 @@ def set_cycle_units(record, focus, units):
         settings[focus] = focus_settings(record, focus)
     settings[focus].setdefault("planung", {})["zyklus_einheiten"] = units
     return updated
-def tempo_cycle_position(te, units):
-    """Position in der 14er-Laufreihe und Nummer der Steigerungseinheit (0 = keine)."""
-    extra = max(0, units - 14)
-    if te <= 11:
-        return te, 0
-    if te <= 11 + extra:
-        return 11, te - 11
-    return te - extra, 0
 def focus_unit_key(record, cycle, te, focus):
     if focus is None:
         return json.dumps([cycle, te], ensure_ascii=False)
@@ -1692,8 +1686,6 @@ def render_roster_import():
 # Soll und Ist werden unabhängig voneinander versioniert gespeichert.
 PROTOCOL_COLUMNS = ["Übung", "Last (kg)", "Sätze", "Wdh. je Satz/Seite", "Strecke (m)", "Zeit (s)", "Technik", "Belastung", "Anmerkung"]
 NUMERIC_COLUMNS = PROTOCOL_COLUMNS[1:6]
-# Shared source embedded in each standalone main.py at build time.
-WEEK_RULES_VERSION = '2026-09-20-wochensteuerung'
 def validate_timing(timing):
     if not isinstance(timing, dict):
         raise ValueError('Ungültige Zeitplanung.')
@@ -1728,23 +1720,15 @@ def weekly_timing(sport, band, frequency, unit):
                        ('Haupteinheit' if unit == 'TE1' else 'kürzere zweite Einheit'))
     timing['athletic_hint'] = 'Dauer nach vollständigem Einheitsplan; Erwärmung eingeschlossen.'
     timing['transfer_hint'] = 'Sportartspezifischer Anschluss wird separat geplant.'
-    if frequency == 2 and sport != 'Skispringen':
+    if frequency == 2:
         main = {'U11': (60, 60), 'U13': (70, 70), 'U15': (75, 75), 'U17': (75, 75)}
         second = {'U11': (35, 35), 'U13': (40, 40), 'U15': (45, 45), 'U17': (45, 45)}
         low, high = (main.get(band, (80, 90)) if unit == 'TE1' else second.get(band, (50, 60)))
         timing['planned_athletic_min'] = float(low)
         label = str(low) if low == high else f'{low}–{high}'
         timing['athletic_hint'] = f'Richtwert {label} Minuten einschließlich Erwärmung; individuell veränderbar.'
-        if sport in ('Fussball', 'Basketball'):
-            timing['planned_transfer_min'] = 30.
-            timing['transfer_hint'] = ('Fußballspezifischer Anschluss: Richtwert 30–45 Minuten zusätzlich.'
-                                       if sport == 'Fussball' else
-                                       'Basketballspezifischer Anschluss: Vorschlag 30–45 Minuten zusätzlich.')
-    if sport == 'Leichtathletik':
-        timing['transfer_hint'] = 'Anschluss beispielsweise lockere Steigerungsläufe; keine pauschale Zusatzdauer.'
-    if sport == 'Skispringen':
-        timing['athletic_hint'] = 'Sportartspezifische Dauer einschließlich Erwärmung eintragen.'
-        timing['transfer_hint'] = 'Skisprungspezifischer Transfer im eigenen Ablauf; kein pauschaler Ballteil.'
+        timing['planned_transfer_min'] = 30.
+        timing['transfer_hint'] = 'Fußballspezifischer Anschluss: Richtwert 30–45 Minuten zusätzlich.'
     return timing
 def organization_text(frequency, config=None):
     config = validate_organization(config or {})
@@ -1891,9 +1875,7 @@ def protocol_rows(frame):
 POWERBAGS = (5,8,10,12,15,17,20)
 VBT_KINDS = ('Nicht zugeordnet','Mittlere konzentrische Geschwindigkeit','Spitzengeschwindigkeit')
 # Doc Athletic: getrennte Ball-Erwärmung und maximale M-Sprints, 20.09.2026.
-M_TRAINING_REVISION = '105-205-305-M-Formen'
 BALL_WARMUP_BLOCK = '01 M-Lauf mit Ball · Wahlübung (Trainer-Veto)'  # Frank Müller, 25.09.2026
-WARMUP_CHOICE_NOTE = " · Wahlübung: variable Spielformen gemäß Vorgabe (Trainer-Veto)"  # muss zu doc_athletic_core.py passen
 M_BALL_EDGES = {'U11': 24., 'U13': 26., 'U15': 28.}
 E2_BALL_DISTANCES = (70., 75., 80., 85., 90., 95.)
 M_MAX_EDGES = {'U11': (10., 15.), 'U13': (12., 18.), 'U15': (15., 20.)}
@@ -2112,9 +2094,6 @@ def validate_kader(kader):
             validate_jump_tests(p.get("sprungtests", []))
             validate_field_tests(p.get("feldtests", []))
             validate_sessions(p.get("einheitenprotokoll", {}))
-            rate = p.get("folge_rate", 0)
-            if type(rate) not in (int, float) or not math.isfinite(rate) or not 0 <= rate <= 20:
-                raise ValueError("Ungültige Folgeempfehlungsrate.")
             cycles = p.get("makrozyklen", {})
             if not isinstance(cycles, dict) or len(cycles) > 200:
                 raise ValueError("Ungültige Makrozyklen.")
@@ -2915,12 +2894,8 @@ def generate_unit(record, focus, te, name="Athlet"):
     einstieg = int(record.get('zyklus_einstieg', 1))
     level = te_num + einstieg - 1
     week += einstieg - 1
-    # Existing 14-block sequence is keyed to TE, never to calendar week.
-    # Bei 15/16 Einheiten: Steigerungseinheiten nach TE 11, Test in der letzten TE.
-    woche, steigerung = tempo_cycle_position(te_num, cycle_length)
     abc_rows = abc_rows_115(band, geschlecht_wahl, week, True, 10.0)
     warmup = warmup_text(band, te_num)
-    bag_count = weekly_reps(10, week, 15, True)
     quality_day = short_day or speed_mode
     bag_wdh = "8–6–5 Wdh. (3 Sätze)" if quality_day else rep_rule(geschlecht_wahl, level) + " je Satz"
     day_label = "Vollständige Komplexeinheit · 1 TE/Woche" if einheiten == 1 else ("Neuromuskulär / vor dem Spiel" if short_day else "Haupttag")
@@ -2945,140 +2920,20 @@ def generate_unit(record, focus, te, name="Athlet"):
     else:
         burpee_rep = rep_rule(geschlecht_wahl, level)
         extra_rows += exercise_row("Burpees / Liegestützsprünge mit Strecksprung", "3", burpee_rep, "Powerbar 2–3 kg gesamt" if plan_age >= 14 else "Zusatzlast nicht hinterlegt", f"+1 Wdh./Woche")
-        paired,_ = progressive_reps(aktuelle_daten,zyklus_name,focus,cheer_name,geschlecht_wahl,level,10)
-        pair_text = f"{paired} links + {paired} rechts = {paired*2} gesamt"
+        paired,cheer_text = progressive_reps(aktuelle_daten,zyklus_name,focus,cheer_name,te_num,level,10,25,
+            "+1 kg je Hand; Wiederholungen nach Tonnage-Regel neu berechnen")
+        pair_text = f"{paired} links + {paired} rechts = {paired*2} gesamt" + (cheer_text[cheer_text.index(" · "):] if " · " in cheer_text else "")
         extra_rows += exercise_row(cheer_name, "3", pair_text, cheer_load(band,geschlecht_wahl), "Progression nach Trainer-Veto und dokumentierter Ist-Leistung")
-        paired,_ = progressive_reps(aktuelle_daten,zyklus_name,focus,curler_ein_name,geschlecht_wahl,level,10)
-        pair_text = f"{paired} links + {paired} rechts = {paired*2} gesamt"
+        paired,curler_text = progressive_reps(aktuelle_daten,zyklus_name,focus,curler_ein_name,te_num,level,10,25,
+            "straffere Einstellung am Gerät")
+        pair_text = f"{paired} links + {paired} rechts = {paired*2} gesamt" + (curler_text[curler_text.index(" · "):] if " · " in curler_text else "")
         extra_rows += exercise_row(curler_ein_name, "3", pair_text, "Gerätespezifischer Widerstand: aus dokumentierter Ist-Einheit in Sollplan übernehmen", "Progression nach Trainer-Veto und dokumentierter Ist-Leistung")
-        _,bilateral = progressive_reps(aktuelle_daten,zyklus_name,focus,curler_bei_name,geschlecht_wahl,level,15)
+        _,bilateral = progressive_reps(aktuelle_daten,zyklus_name,focus,curler_bei_name,te_num,level,15,25,
+            "straffere Einstellung am Gerät")
         extra_rows += exercise_row(curler_bei_name, "3", bilateral, "Gerätespezifischer Widerstand: aus dokumentierter Ist-Einheit in Sollplan übernehmen", "Progression nach Trainer-Veto und dokumentierter Ist-Leistung")
     abc_last_str = abc_rows[0][4]
     row_abc = rows_html(abc_rows)
     pause_komplex = PARTNER_PAUSE
-    if plan_age <= 15:
-        if woche in [1, 2]:
-            tl_pos = "nach_komplex"
-            tl_text = "6 x 100m TL (75-80%)"
-            tl_pause = "50m Gehpause"
-        elif woche in [3, 4]:
-            tl_pos = "nach_komplex"
-            tl_text = "4 x 150m + 2 x 100m TL (> 75%)"
-            tl_pause = "50m Gehpause"
-        elif woche in [5, 6]:
-            tl_pos = "nach_komplex"
-            tl_text = "2 x 300m + 2 x 200m + 2 x 150m TL (Absteigend)"
-            tl_pause = "100m Gehpause"
-        elif woche == 7:
-            tl_pos = "nach_komplex"
-            tl_text = "2 x 400m + 2 x 300m + 2 x 200m TL (Absteigend)"
-            tl_pause = "100m Gehpause"
-        elif woche in [8, 9, 10]:
-            tl_pos = "vor_komplex"
-            tl_text = "2 x 600m (Basis 60%) + 2 x 400m + 3 x 200m (GLA vorab)"
-            tl_pause = "100m Gehpause (200m bei 50m GP)"
-        elif woche == 11:
-            tl_pos = "vor_komplex"
-            tl_text = "3 x 600m TL (Richtwert 1:40 min) + 4 x 150m Speed"
-            tl_pause = "100m Gehpause"
-        elif woche == 12:
-            tl_pos = "nach_komplex"
-            tl_text = "Speed-Shuttle auf Kunstrasen: 4 x 55m Doppel-Shuttle + Antritte"
-            tl_pause = "Staffelpause"
-        elif woche == 13:
-            tl_pos = "marathon"
-            tl_text = "Athletik & Lauf-Marathon: 3 Runden à 400m TL (50%) + Parcours"
-            tl_pause = "Im Kettenablauf"
-        else:
-            tl_pos = "nach_komplex"
-            tl_text = "Abschlusstest: 60m Zeit + 250m Zeit + 600m Zeit (Maximal)"
-            tl_pause = "Volle Erholung"
-    elif plan_age <= 17:
-        if woche in [1, 2]:
-            tl_pos = "nach_komplex"
-            tl_text = "6 x 100m Technik TL (80%) [Lauf-ABC ohne Stange]"
-            tl_pause = "50m Gehpause"
-        elif woche in [3, 4]:
-            tl_pos = "nach_komplex"
-            tl_text = "2 x 300m + 2 x 200m + 2 x 150m TL (Absteigend)"
-            tl_pause = "100m Gehpause"
-        elif woche in [5, 6]:
-            tl_pos = "nach_komplex"
-            tl_text = "1 x 500m + 1 x 400m + 2 x 300m + 2 x 200m (Absteigend 70-80%)"
-            tl_pause = "100m Gehpause"
-        elif woche == 7:
-            tl_pos = "nach_komplex"
-            tl_text = "2 x 550m + 2 x 350m TL (Kaskade > 65%)"
-            tl_pause = "100m Gehpause"
-        elif woche in [8, 9, 10]:
-            tl_pos = "vor_komplex"
-            tl_text = "GLA vorab: 600m, 600m, 500m, 500m (je 100m GP) vor Stationen"
-            tl_pause = "100m Gehpause"
-        elif woche == 11:
-            tl_pos = "vor_komplex"
-            tl_text = "GLA vorab: 1 x 700m Kappe + 2 x 500m + 3 x 150m Speed"
-            tl_pause = "100m Gehpause"
-        elif woche == 12:
-            tl_pos = "nach_komplex"
-            tl_text = "Witterungs-Speed: 12 x 40m Doppel-Shuttle mit 3 kg ZL"
-            tl_pause = "5s Wende / Staffelpause"
-        elif woche == 13:
-            tl_pos = "marathon"
-            tl_text = "Athletik- & Lauf-Marathon: 3x 400m Schleifen-Shuttle + Parcours"
-            tl_pause = "Im Kettenablauf"
-        else:
-            tl_pos = "nach_komplex"
-            tl_text = "Saison-Peak: 60m Sprint + 250m + 600m Test auf Zeit"
-            tl_pause = "Volle Erholung"
-    else:
-        if woche in [1, 2]:
-            tl_pos = "nach_komplex"
-            tl_text = "6 x 100m Technik Sprintlauf (> 85%) direkt nach Station 1"
-            tl_pause = "50-100m Gehpause"
-        elif woche in [3, 4]:
-            tl_pos = "nach_komplex"
-            tl_text = "Komplextransfer: 2x 150m Sprint (>85%) + 1x 350m (>70%) + 1x 550m (70%)"
-            tl_pause = "100m Gehpause"
-        elif woche in [5, 6]:
-            tl_pos = "nach_komplex"
-            tl_text = "Absteigende Kaskade: 600m (60%) + 500m (70%) + 400m (70%) + 300m (80%)"
-            tl_pause = "100m langsame Gehpause"
-        elif woche == 7:
-            tl_pos = "nach_komplex"
-            tl_text = "KZA Kaskade: 2x 450m + 2x 550m (> 60%) + 100m Gehpause"
-            tl_pause = "100m Gehpause"
-        elif woche in [8, 9, 10]:
-            tl_pos = "vor_komplex"
-            tl_text = "GLA vorab: 800m (unter 3:15 min) + 600m, 600m (unter 2:30 min) + 500m vor Stationen"
-            tl_pause = "100m Gehpause"
-        elif woche == 11:
-            tl_pos = "vor_komplex"
-            tl_text = "GLA vorab: 800m Basis + 600m, 600m + 500m, 500m (je 100m GP)"
-            tl_pause = "100m Gehpause"
-        elif woche == 12:
-            tl_pos = "nach_komplex"
-            tl_text = "Staffel-Ausdauer Kunstrasen: 4x 220m (80%) + 5x 220m (90%)"
-            tl_pause = "Staffelpause"
-        elif woche == 13:
-            tl_pos = "marathon"
-            tl_text = "Athletik- & Lauf-Marathon: 3x 400m TL (>50%) + Tartan-Halbmond Parcours"
-            tl_pause = "Im Kettenablauf"
-        else:
-            tl_pos = "nach_komplex"
-            tl_text = "Abschlusstest: 60m Sprint + 250m Sprint + 600m Test auf Zeit"
-            tl_pause = "Volle Erholung"
-    if steigerung:
-        # Längster Lauf bleibt bei der bisherigen Höchststrecke (600/700/800 m).
-        tl_pos = "vor_komplex"
-        tl_pause = "100m Gehpause"
-        if plan_age <= 15:
-            tl_text = f"3 x 600m TL (Richtwert 1:40 min) + {4 + steigerung} x 150m Speed"
-        elif plan_age <= 17:
-            tl_text = f"GLA vorab: 1 x 700m Kappe + 2 x {min(600, 500 + 50 * steigerung)}m + 3 x 150m Speed"
-        else:
-            strecke = min(600, 500 + 50 * steigerung)
-            tl_text = f"GLA vorab: 800m Basis + 600m, 600m + {strecke}m, {strecke}m (je 100m GP)"
-        tl_text += f" · Steigerungseinheit {steigerung} nach TE 11"
     # Frank Müller, 25.09.2026: TE 1–15 Tempolauf-Pyramide nach 50-m-Regel; U11 alaktazid.
     tl_pos = "nach_komplex"
     if band == "U11":
@@ -3105,9 +2960,6 @@ def generate_unit(record, focus, te, name="Athlet"):
     phase_label = "Komplextraining: Kraft und anschließende Sprints/Läufe"
     if short_day:
         phase_label = "Neuromuskulärer Erinnerungsreiz"
-    row_gla_vorab = ""
-    if tl_pos == "vor_komplex":
-        row_gla_vorab = f'<tr style="background-color: #FCE4D6;"><td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold; color: #C00000;">Block 1: GLA Vorab</td><td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold;">{tl_text}</td><td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">Serie</td><td style="padding: 6px 8px; border: 1px solid #D9D9D9;">Kaskade vor Kraft</td><td style="padding: 6px 8px; border: 1px solid #D9D9D9;">–</td><td style="padding: 6px 8px; border: 1px solid #D9D9D9;">60-70% Vmax</td><td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">{tl_pause}</td></tr>'
     row_tl_transfer = ""
     row_speed_tempo = ""
     block_rounds = None
@@ -3181,7 +3033,6 @@ def generate_unit(record, focus, te, name="Athlet"):
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; text-align: center;">Trinkp.</td>
     </tr>
     {row_abc}
-    {row_gla_vorab}
     {row_hurdles}
     <tr style="background-color: #FCE4D6;">
     <td style="padding: 6px 8px; border: 1px solid #D9D9D9; font-weight: bold;">Eigenständige Kraft-Hauptübung</td>

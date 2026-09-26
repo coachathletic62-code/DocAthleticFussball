@@ -138,7 +138,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '25.09.2026 · Speicherhinweis dezent statt ganzseitiger Warnkasten; Anmeldebildschirm responsiv'
+BUILD_STAND = '25.09.2026 · M-Lauf mit Ball als Wahlübung (Trainer-Veto) gekennzeichnet; Serien statt Bahnen korrigiert'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -1862,6 +1862,7 @@ POWERBAGS = (5,8,10,12,15,17,20)
 VBT_KINDS = ('Nicht zugeordnet','Mittlere konzentrische Geschwindigkeit','Spitzengeschwindigkeit')
 # Doc Athletic: getrennte Ball-Erwärmung und maximale M-Sprints, 20.09.2026.
 M_TRAINING_REVISION = '105-205-305-M-Formen'
+BALL_WARMUP_BLOCK = '01 M-Lauf mit Ball · Wahlübung (Trainer-Veto)'  # Frank Müller, 25.09.2026
 M_BALL_EDGES = {'U11': 24., 'U13': 26., 'U15': 28.}
 E2_BALL_DISTANCES = (70., 75., 80., 85., 90., 95.)
 M_MAX_EDGES = {'U11': (10., 15.), 'U13': (12., 18.), 'U15': (15., 20.)}
@@ -1870,7 +1871,7 @@ def m_training_defaults(sport, band):
         'sport': sport, 'band': band,
         'ball': {'enabled': sport in ('Fussball', 'Basketball') and band in M_BALL_EDGES,
                  'edge_m': 17.5 if (sport, band) == ('Fussball', 'U11') else M_BALL_EDGES.get(band, 24.),
-                 'series': 2 if band == 'U11' else 3, 'runs': 5,
+                 'series': 2, 'runs': 5,  # Frank Müller, 25.09.2026: links + rechts = 2 Serien, für alle Altersklassen
                  'run_seconds': None, 'notes': '',
                  'e2_progression': (sport, band) == ('Fussball', 'U11'),
                  'timed_distance_m': None},
@@ -1947,7 +1948,7 @@ def m_training_rows(value, sport, band, te, frequency=1, short_day=False):
                      if sport == 'Fussball' else 'Dribbling links/rechts im Wechsel; enge Richtungswechsel.'
                      if sport == 'Basketball' else 'Ballkoordination nach eingetragener Organisationsform.')
         if ball['e2_progression'] and te < 4:
-            rows.append({'Block': '01 M-Lauf mit Ball', 'Trainingsmittel': 'Paarweises Passspiel · koordinative Erwärmung',
+            rows.append({'Block': BALL_WARMUP_BLOCK, 'Trainingsmittel': 'Paarweises Passspiel · koordinative Erwärmung',
                          'Sätze': 'Partnerwechsel im Ablauf', 'Wdh_oder_Strecke': 'Bis zur Mittellinie und zurück; dort wenden; Streckenlänge platzabhängig',
                          'Zusatzlast': 'Ball', 'Intensität': 'Locker; kontinuierliches Passspiel',
                          'Pause': 'Im gemeinsamen Erwärmungsablauf',
@@ -1956,7 +1957,7 @@ def m_training_rows(value, sport, band, te, frequency=1, short_day=False):
             distance_m = E2_BALL_DISTANCES[min(te - 4, len(E2_BALL_DISTANCES) - 1)] if ball['e2_progression'] else None
             if ball['e2_progression']:
                 technique += ' Der Nächste folgt; enge Stangenumquerung und präzise Ballführung unter Anforderungsdruck. Aufbauwerte gerundet. '
-            rows.append({'Block': '01 M-Lauf mit Ball', 'Trainingsmittel': 'M-Lauf mit Ball · koordinative Erwärmung',
+            rows.append({'Block': BALL_WARMUP_BLOCK, 'Trainingsmittel': 'M-Lauf mit Ball · koordinative Erwärmung',
                      'Sätze': f"{ball['series']} Serien", 'Wdh_oder_Strecke': m_distance_text(ball, distance_m),
                      'Zusatzlast': 'Ball', 'Intensität': 'Relativ locker; kontrollierte Ballführung',
                      'Pause': PARTNER_PAUSE,
@@ -2173,13 +2174,13 @@ def organize_multisport_html(html, frequency, short_day, main_sets, sport, band,
     parser = MatrixRowsParser(); parser.feed(html)
     if not parser.rows: return html
     warm, hurdles, stations, running, cool = [], [], [], [], []
-    has_ball_warmup = any(row[0] == '01 M-Lauf mit Ball' for row in parser.rows)
+    has_ball_warmup = any(row[0] == BALL_WARMUP_BLOCK for row in parser.rows)
     for row in parser.rows:
         if has_ball_warmup and sport == 'Fussball' and band == 'U11' and row[0] == 'Erwärmung':
             continue  # The specific ball prescription replaces the generic ball warm-up.
         if len(row) != 7: raise ValueError('Trainingsmatrix benötigt sieben Spalten.')
         row = list(row)
-        if row[0] == '01 M-Lauf mit Ball':
+        if row[0] == BALL_WARMUP_BLOCK:
             index = next((i for i, r in enumerate(warm) if r[0].startswith('Block 1: ABC')), len(warm))
             warm.insert(index, row)
         elif row[0] == 'Erwärmung' or row[0].startswith('Block 1: ABC'):

@@ -122,11 +122,16 @@ def estimate_time(distance, anchors, extrapolate):
     return t1 * (distance/d1)**exponent, source
 
 def build_tempo_table(t60, t150, source150, references, test_distance, test_seconds, interpolate=True, extrapolate=False):
-    calc100 = round(t60 * 1.615, 2)
-    modeled = {50:calc100 / 1.93, 75:calc100 * .775, 100:calc100,
-               150:t150, 200:round(t60 * 3.265,2)}
-    anchors = {60:t60}
-    if source150 != "berechnet":
+    modeled = {}
+    anchors = {}
+    if t60 is not None and t60 > 0:
+        calc100 = round(t60 * 1.615, 2)
+        modeled = {50:calc100 / 1.93, 75:calc100 * .775, 100:calc100,
+                   200:round(t60 * 3.265,2)}
+        if t150 is not None and t150 > 0:
+            modeled[150] = t150
+        anchors[60] = t60
+    if source150 != "berechnet" and t150 is not None and t150 > 0:
         anchors[150] = t150
     if test_seconds > 0:
         anchors[test_distance] = test_seconds
@@ -139,9 +144,9 @@ def build_tempo_table(t60, t150, source150, references, test_distance, test_seco
             base, source = explicit, "Trainerreferenz"
         elif distance == test_distance and test_seconds > 0:
             base, source = test_seconds, "Referenz: Einzeltest"
-        elif distance == 60:
+        elif distance == 60 and 60 in anchors:
             base, source = t60, "60-m-Referenz"
-        elif distance == 150 and source150 != "berechnet":
+        elif distance == 150 and source150 != "berechnet" and 150 in anchors:
             base, source = t150, "150-m-Referenz"
         elif estimation is not None:
             base,source = estimation

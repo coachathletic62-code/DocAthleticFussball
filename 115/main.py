@@ -1,5 +1,5 @@
 # ============================================================================
-# DOC ATHLETIC TRAIN SMART EVOLUTION SOFTWARE - FUSSBALL (Version 120)
+# DOC ATHLETIC TRAIN SMART EVOLUTION SOFTWARE - FUSSBALL (Version 120.1)
 # ChatGPT überarbeitet auf Grundlage 23.8.5; Modul 1
 # Überarbeitet: kurze Trainingsansicht, Athletenprofile, Tests, Einheitenverlauf
 # Stand: 24.09.2026 – Entwicklungsstatus, Trainingsmatrix und Trainer-Veto
@@ -40,7 +40,7 @@ SAVED_PLAN_STYLE = """
 .doc-saved-plan tr:nth-child(even) td {background:#fff}
 @media print {.doc-saved-plan {background:#fff;color:#111;border:0;padding:0}.doc-saved-plan p,.doc-saved-plan h3 {color:#111 !important}}
 """
-st.set_page_config(page_title="Doc Athletic – Fußball · 120", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Doc Athletic – Fußball · 120.1", layout="wide", initial_sidebar_state="collapsed")
 st.markdown("<style>"+SAVED_PLAN_STYLE+"""
 .stApp {background:#0b0c10;color:#f5f5f5;color-scheme:dark}
 [data-testid="stHeader"] {background:#0b0c10;color:#f5f5f5}
@@ -158,7 +158,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '26.09.2026 · Logo ersetzt auf dem Handy die dort ausgeblendete Übersicht'
+BUILD_STAND = '27.09.2026 · Zykluswechsel, Trainer-Veto und Laufreferenzen geprüft'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -352,9 +352,8 @@ def apply_training_assignment(record, calendar, development, gender, veto_band=N
         updated["sbe"] = PROFILE_DEFAULTS[football_profile(updated["profil"],gender)]["sbe_ziel"]
     return updated, result, changed
 
-# Frank Müller, 25.09.2026: 14 Einheiten je Halbjahr; bei 15/16 Einheiten werden
-# nach TE 11 Steigerungseinheiten eingeschoben. Shuttle, Marathon und Abschlusstest
-# folgen immer als letzte drei Einheiten.
+# Aktuelle Planung: 16 Einheiten für alle Altersklassen und Geschlechter.
+# Frühere gespeicherte Zykluslängen bleiben zur Archivansicht lesbar.
 CYCLE_UNIT_CHOICES = (14, 15, 16)
 PHASE_NAMES = {"Grundlast": "Stand", "Jumps": "Jumps", "Sprünge": "Sprünge"}
 def cycle_units(record, focus):
@@ -2314,17 +2313,16 @@ def reload_saved():
     st.session_state.edit_epoch = st.session_state.get("edit_epoch",0) + 1
 
 def athlete_tempo(record, focus='komplex'):
-    if record.get('t_60') is None:
-        return []
+    t60=record.get('t_60')
     source=record.get('t_150_quelle','berechnet')
-    t150=record.get('t_150') if source!='berechnet' else round(record['t_60']*2.375,2)
-    if t150 is None:
-        return []
+    t150=record.get('t_150') if source!='berechnet' else round(t60*2.375,2) if t60 else None
     test=run_reference(record,focus)
     references=deepcopy(record.get('tempo_referenzen',{}))
     if 'lauftest' in record:
         references.pop(str(test['distanz_m']),None)
-    rows=build_tempo_table(record['t_60'],t150,source,references,
+    if not (t60 or t150 or test['zeit_s'] or any(references.values())):
+        return []
+    rows=build_tempo_table(t60,t150,source,references,
                           test['distanz_m'],test['zeit_s'] or 0,True,False)
     if 'lauftest' in record:
         for row in rows:
@@ -2512,43 +2510,57 @@ def render_athlete_editor(selection=None,unit=None):
             if old.get('sprungtests'):st.dataframe(pd.DataFrame([jump_summary(t) for t in old['sprungtests']]),hide_index=True)
             if old.get('m_lauf_referenzen'):st.dataframe(pd.DataFrame(old['m_lauf_referenzen']),hide_index=True)
 
-def change_cycle(record, name, restore=False):
+def change_cycle(record, name, restore=False, entry_level=None):
+    """Zyklus wechseln, ohne Messungen oder abgeschlossene Einheiten zu überschreiben."""
     updated=deepcopy(record); active=updated.get('aktiver_makrozyklus','Bestand')
     archive=deepcopy(updated.get('makrozyklen',{}))
-    if not name or len(name)>120 or name==active or (not restore and name in archive):
+    if not isinstance(name,str) or not name.strip() or len(name)>120 or name==active or (not restore and name in archive):
         raise ValueError('Bitte einen anderen, eindeutigen Zyklusnamen eingeben.')
     snapshot={k:deepcopy(v) for k,v in updated.items() if k not in ('makrozyklen','aktiver_makrozyklus','einheitenprotokoll')}
     if restore:
         if name not in archive:raise ValueError('Makrozyklus nicht vorhanden.')
         restored=archive.pop(name)
+        # Zyklusgebundene Angaben gehören stets zum geöffneten Archivstand.
+        for k in ('zyklus_einstieg','empfehlungen_aktiv','empfehlungen_naechster'):
+            if k in restored:updated[k]=deepcopy(restored[k])
+            else:updated.pop(k,None)
         if restored.get('profil')==updated.get('profil'):
             for k in ('planung','phasensteuerung','fussball_schwerpunkte','m_training'):
                 if k in restored:updated[k]=deepcopy(restored[k])
                 else:updated.pop(k,None)
     else:
+        if type(entry_level) is not int or not 1 <= entry_level <= 15:
+            raise ValueError('Bitte das Einstiegsniveau des neuen Zyklus als Trainer wählen: TE 1 bis TE 15.')
         updated['phasensteuerung']=phase_defaults()
-        updated.setdefault('planung',{}).update(startwoche=1,progression=True)
-        # Frank, 25.09.2026: Einstieg U11–U15 auf Niveau TE 10, ab U17 TE 8; Trainer-Veto.
-        band=updated.get('profil','Fussball_U15').split('_')[1]
-        updated['zyklus_einstieg']=10 if band in ('U11','U13','U15') else 8
+        updated.setdefault('planung',{}).update(startwoche=1,progression=True,zyklus_einheiten=16)
+        for settings in updated.get('fussball_schwerpunkte',{}).values():
+            settings.setdefault('planung',{}).update(startwoche=1,progression=True,zyklus_einheiten=16)
+        updated['zyklus_einstieg']=entry_level
         updated['empfehlungen_aktiv']=updated.pop('empfehlungen_naechster',{})
+        # Die Empfehlungen wurden an diesen Nachfolgezyklus übergeben, nicht an
+        # jeden später aus dem Archiv angelegten Zyklus.
+        snapshot.pop('empfehlungen_naechster',None)
     archive[active]=snapshot
     updated.update(makrozyklen=archive,aktiver_makrozyklus=name)
     return updated
 
 def render_cycle_controls(record,sport,name,key):
     level=int(record.get('zyklus_einstieg',1))
-    chosen=st.selectbox('Einstieg dieses Zyklus auf dem Niveau von',list(range(1,17)),index=level-1,
+    levels=list(range(1,16))
+    chosen=st.selectbox('Einstieg dieses Zyklus auf dem Niveau von',levels,index=levels.index(level) if level in levels else None,
         format_func=lambda n:f'TE {n}' if n>1 else 'TE 1 (Grundniveau)',key=key('cycle_level'),
-        help='Neuer Zyklus: U11–U15 wie TE 10, ab U17 wie TE 8. Per Trainer-Veto änderbar.')
-    if chosen!=level and st.button('Einstieg speichern',key=key('cycle_level_save')):
+        help='Trainerentscheidung nach der Pause. Steuert die progressive Wiederholungs- und Laufbelastung; Kraftphasen werden separat festgelegt.')
+    if chosen is not None and chosen!=level and st.button('Einstieg speichern',key=key('cycle_level_save')):
         try:
             updated=deepcopy(record);updated['zyklus_einstieg']=chosen
-            persist_record(sport,name,updated,f'Einstieg auf Niveau TE {chosen} gespeichert.')
+            persist_record(sport,name,updated,f'Einstieg auf Niveau TE {chosen} gespeichert. Bereits gespeicherte Sollpläne bleiben erhalten.')
         except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
+    st.caption('Neuer Makrozyklus: 16 Einheiten, gezählt ab TE 1; TE 16 ist der Retest. Das Einstiegsniveau entscheidet der Trainer nach aktuellem Zustand. Kraftphasen starten neu und bleiben über das Trainer-Veto anpassbar. Gespeicherte Empfehlungen sind gesondert zu prüfen.')
     cycle_name=st.text_input('Name des neuen Makrozyklus',key=key('cycle_name'))
-    if st.button('Neuen Makrozyklus beginnen',key=key('cycle_new')):
-        try:persist_record(sport,name,change_cycle(record,cycle_name.strip()),'Neuer Makrozyklus begonnen.')
+    entry=st.selectbox('Einstiegsniveau für den neuen Makrozyklus',levels,index=None,
+        placeholder='Nach Pause und Trainingszustand wählen',format_func=lambda n:f'TE {n}',key=key('cycle_new_level'))
+    if st.button('Neuen Makrozyklus beginnen',key=key('cycle_new'),disabled=entry is None):
+        try:persist_record(sport,name,change_cycle(record,cycle_name.strip(),entry_level=entry),'Neuer Makrozyklus begonnen: 16 Einheiten, Einstieg durch Trainer festgelegt.')
         except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
     if record.get('makrozyklen'):
         chosen=st.selectbox('Gespeicherten Makrozyklus aufrufen',list(record['makrozyklen']),key=key('cycle_old'))
@@ -2630,6 +2642,12 @@ def saved_plan_html(plan):
         index+=1
     return '<section class="doc-saved-plan" data-saved-plan="true">'+''.join(rendered)+'</section>'
 
+def plan_exercise_names(html_or_text):
+    """Übungen aus generierter HTML-Matrix oder gespeichertem Textplan lesen."""
+    parser=MatrixRowsParser()
+    parser.feed(html_or_text if '<tbody' in html_or_text.lower() else saved_plan_html(html_or_text))
+    return list(dict.fromkeys(row[1].strip() for row in parser.rows if len(row)==7 and row[1].strip()))
+
 def export_plan(plan):
     return ('<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Doc Athletic Trainingsplan</title>'
             '<style>body{font-family:Arial}@media print{@page{size:A4 landscape}}'+SAVED_PLAN_STYLE+'</style></head>'
@@ -2653,17 +2671,12 @@ def render_training():
     band=record['profil'].split('_')[1]
     cfg,total,units_now=cycle_plan(record,focus,band)
     with unit_column:
-        chosen_units=st.selectbox('Einheiten im Halbjahr',CYCLE_UNIT_CHOICES,width=280,index=CYCLE_UNIT_CHOICES.index(units_now),
-            key=widget_key('cycle_units',sport,focus,name),disabled=guest,
-            help='Standard 16. Die letzte Einheit ist immer der Retest für den Jahresvergleich.')
-    if chosen_units!=units_now and not guest:
-        try:persist_record(sport,name,set_cycle_units(record,focus,chosen_units),f'Halbjahr auf {chosen_units} Einheiten eingestellt.')
-        except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
+        st.caption(f'{units_now} Einheiten · Retest zum Abschluss')
     archived_units={item['te'] for item in record.get('einheitenprotokoll',{}).values()
                     if item.get('cycle')==cycle and item.get('schwerpunkt',legacy_focus(record))==focus}
     options=sorted(set(range(1,total+1))|archived_units)
     with unit_column:
-        te=st.selectbox('Trainingseinheit (TE)',options,width=280,format_func=lambda n:f'TE {n} · Retest' if n==units_now else f'TE {n}',key='training_te')
+        te=st.selectbox('Trainingseinheit (TE)',options,width=280,format_func=lambda n:f'TE {n} · Retest' if n==units_now else f'TE {n}',key='training_te_'+json.dumps([sport,name,focus,cycle],ensure_ascii=False))
     with st.container(border=True):
         render_athlete_editor(selection,(cycle,te,focus))
     saved=record.get('einheitenprotokoll',{}).get(focus_unit_key(record,cycle,te,focus))
@@ -2768,19 +2781,11 @@ def render_training():
             actual_error=False
             if st.button('Einzelwerte erfassen oder korrigieren',key=key('values_button')):st.session_state[key('values_open')]=True
             if st.session_state.get(key('values_open')):
-                def plan_exercise_names(html_or_text):
-                    try:
-                        p=MatrixRowsParser();p.feed(html_or_text)
-                        names=[r[1].strip() for r in p.rows if len(r)==7 and r[1].strip()]
-                    except Exception:
-                        names=[]
-                    seen=set();ordered=[]
-                    for n in names:
-                        if n not in seen:seen.add(n);ordered.append(n)
-                    return ordered
                 # Frank Müller, 25.09.2026: Übungsnamen kommen automatisch aus dem angezeigten
                 # Plan; der Trainer trägt nur noch die erreichten Zahlen ein.
                 names=plan_exercise_names(generated if current==standard_text else current)
+                if not names and not actual:
+                    st.info('Dieser Freitextplan enthält keine erkennbare Übungstabelle. Bitte die Übungsnamen hier selbst eintragen.')
                 rows=actual or [{'Übung':n,**{k:None for k in NUMERIC_COLUMNS},'Technik':'Nicht bewertet','Belastung':'Nicht bewertet','Anmerkung':''} for n in (names or [''])]
                 frame=pd.DataFrame(rows,columns=PROTOCOL_COLUMNS)
                 for col in NUMERIC_COLUMNS:frame[col]=pd.to_numeric(frame[col],errors='coerce').astype(float)
@@ -2804,7 +2809,7 @@ def render_training():
     if st.session_state.get(key('tempo_open')):
         tempo=athlete_tempo(record,focus)
         if tempo:st.dataframe(pd.DataFrame(tempo),hide_index=True)
-        else:st.info('Noch keine Sprintreferenz vorhanden. Trainingsplan und Speicherung sind trotzdem verfügbar.')
+        else:st.info('Noch keine verwendbare Laufreferenz vorhanden. Trainingsplan und Speicherung sind trotzdem verfügbar.')
     st.download_button('Diesen Trainingsplan herunterladen',export_plan(current),file_name=f'Doc_Athletic_TE{te}.html',mime='text/html')
 
 def render_backup():
@@ -2905,8 +2910,8 @@ def generate_unit(record, focus, te, name="Athlet"):
     # Einstieg im Folgezyklus auf höherem Niveau (Frank, 25.09.2026).
     einstieg = int(record.get('zyklus_einstieg', 1))
     level = te_num + einstieg - 1
-    week += einstieg - 1
-    abc_rows = abc_rows_115(band, geschlecht_wahl, week, True, 10.0)
+    progression_week = unit_context(level, einheiten, startwoche, role)[0]
+    abc_rows = abc_rows_115(band, geschlecht_wahl, progression_week, True, 10.0)
     warmup = warmup_text(band, te_num)
     quality_day = short_day or speed_mode
     bag_wdh = "8–6–5 Wdh. (3 Sätze)" if quality_day else rep_rule(geschlecht_wahl, level) + " je Satz"
@@ -3019,7 +3024,7 @@ def generate_unit(record, focus, te, name="Athlet"):
     <h3 style="margin: 0; color: #66fcf1 !important;">TRAININGSMATRIX - EINHEIT: TE {te_num}</h3>
     <span style="color: #ffb703; font-weight: bold; font-size: 14px;">{phase_label}</span>
     </div>
-    <p style="color: #ffffff !important; font-size: 14px; margin-top: 8px;"><strong>Schwerpunkt:</strong> {escape(FOCUS_LABELS[focus])} | <strong>Makrozyklus:</strong> {escape(aktuelle_daten.get("aktiver_makrozyklus", "Bestand"))} | <strong>Athlet:</strong> {escape(ziel)} ({gewicht} kg) | <strong>Woche:</strong> {week}, Einheit {day} | <strong>Ziel:</strong> {day_label} | <strong>Phase:</strong> {PHASE_NAMES.get(effective_phase, effective_phase)} (vorgesehen: {PHASE_NAMES.get(planned_phase, planned_phase)}) | <strong>Lauf-ABC Last:</strong> {abc_last_str}</p>
+    <p style="color: #ffffff !important; font-size: 14px; margin-top: 8px;"><strong>Schwerpunkt:</strong> {escape(FOCUS_LABELS[focus])} | <strong>Makrozyklus:</strong> {escape(aktuelle_daten.get("aktiver_makrozyklus", "Bestand"))} | <strong>Athlet:</strong> {escape(ziel)} ({gewicht} kg) | <strong>Woche:</strong> {week}, Einheit {day} | <strong>Einstiegsniveau:</strong> TE {einstieg} | <strong>Ziel:</strong> {day_label} | <strong>Phase:</strong> {PHASE_NAMES.get(effective_phase, effective_phase)} (vorgesehen: {PHASE_NAMES.get(planned_phase, planned_phase)}) | <strong>Lauf-ABC Last:</strong> {abc_last_str}</p>
     <p>{escape(test_note)}</p>
     <p>{escape(assignment_text)}</p>
     <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; color: #000000; border: 1px solid #7F7F7F;">
@@ -3146,7 +3151,7 @@ if st.session_state.auth_modus is None:
                     st.stop()
     st.stop()
 st.title('Doc Athletic Train Smart Evolution Software')
-st.caption('Fußball 120 · '+BUILD_STAND)
+st.caption('Fußball 120.1 · '+BUILD_STAND)
 if DATABASE_URL:
     st.caption("Speicher: externe PostgreSQL-Datenbank")
 else:

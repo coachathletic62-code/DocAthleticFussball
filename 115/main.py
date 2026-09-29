@@ -5,6 +5,7 @@
 # Stand: 24.09.2026 – Entwicklungsstatus, Trainingsmatrix und Trainer-Veto
 # ============================================================================
 import streamlit as st
+from doc_athletic_upload import UPLOAD_LABEL, UPLOAD_HELP, upload_kind, read_table_cells, render_backup_preview
 from doc_athletic_input import voice_number_input
 from doc_athletic_core import (PARTNER_PAUSE, abc_rows_115, build_tempo_table, phase_defaults, phase_validate, phase_status, phase_exercise_label, weekly_reps, unit_context, kreuzheben_load, cheer_load, profile_age, age_matches_profile, powerbag_load)
 from doc_athletic_storage import (StorageConfig, StorageConflict, StorageError, load_state, save_state, export_backup, decode_backup)
@@ -158,7 +159,7 @@ FOCUS_LABELS = {
     "komplex": "Fußball 1 – Komplextraining",
     "speed_jump": "Fußball 2 – Speed and Jump",
 }
-BUILD_STAND = '27.09.2026 · Zykluswechsel, Trainer-Veto und Laufreferenzen geprüft'
+BUILD_STAND = '29.09.2026 · gemeinsamer Kader-Upload'
 PROFILE_DEFAULTS = {'Fussball_U11': {'sbe_ziel': 'SR 3'}, 'Fussball_U13': {'sbe_ziel': 'SR 2-3'}, 'Fussball_U15_m': {'sbe_ziel': 'SR 2'}, 'Fussball_U15_w': {'sbe_ziel': 'SR 2'}, 'Fussball_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Fussball_U20_m': {'sbe_ziel': 'SR 1'}, 'Fussball_U20_w': {'sbe_ziel': 'SR 1'}, 'Fussball_U23_m': {'sbe_ziel': 'SR 1-0'}, 'Fussball_U23_w': {'sbe_ziel': 'SR 1-0'}, 'Fussball_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Fussball_MASTER_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U11': {'sbe_ziel': 'SR 3'}, 'Leichtathletik_U13': {'sbe_ziel': 'SR 2-3'}, 'Leichtathletik_U15': {'sbe_ziel': 'SR 2'}, 'Leichtathletik_U17_m': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U17_w': {'sbe_ziel': 'SR 1-2'}, 'Leichtathletik_U20_m': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U20_w': {'sbe_ziel': 'SR 1'}, 'Leichtathletik_U23_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_U23_w': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_m': {'sbe_ziel': 'SR 0'}, 'Leichtathletik_MASTER_w': {'sbe_ziel': 'SR 0'}}
 # Version 115: agreed working values; saved plans remain immutable until edited.
 PARTNER_ORGANIZATION = (
@@ -1047,8 +1048,8 @@ def render_field_reference():
             st.error('Diese Vorlage konnte nicht angezeigt werden. Bitte PDF, JPG oder PNG prüfen.')
 def render_test_table():
     st.title('Testtabelle und Dateiimport')
-    capture_mode = st.radio('Erfassungsart', ['Kader und Tests aus Tabelle', 'Testwerte vorhandener Personen'], key='capture_mode', persist_state='session')
-    if capture_mode == 'Kader und Tests aus Tabelle':
+    capture_mode = st.radio('Erfassungsart', ['Kaderdaten hochladen', 'Testwerte vorhandener Personen'], key='capture_mode', persist_state='session')
+    if capture_mode == 'Kaderdaten hochladen':
         render_roster_import()
         return
     st.button('Zur Trainingsplanung', on_click=navigiere, args=('Operativ',))
@@ -1207,91 +1208,7 @@ def roster_number(value, label, low, high, whole=False):
 def roster_header(value):
     return re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFKD', field_text(value)).casefold())
 def roster_table(data, filename):
-    if len(data) > 10_000_000:
-        raise ValueError('Bitte höchstens 10 MB je Tabelle hochladen.')
-    suffix = Path(filename).suffix.lower()
-    limit = FIELD_MAX_ROWS + 20
-    if suffix == '.csv':
-        try:
-            text = data.decode('utf-8-sig')
-        except UnicodeDecodeError:
-            text = data.decode('cp1252')
-        if text.lower().startswith('sep='):
-            text = text.split('\n', 1)[1]
-        first = text.splitlines()[0] if text.splitlines() else ''
-        sep = ';' if ';' in first else '\t' if '\t' in first else ','
-        table = list(csv.reader(io.StringIO(text), delimiter=sep))
-    elif suffix in ('.xlsx', '.ods'):
-        with ZipFile(io.BytesIO(data)) as archive:
-            if sum(x.file_size for x in archive.infolist()) > 50_000_000:
-                raise ValueError('Die entpackte Tabelle ist zu groß.')
-            if suffix == '.ods':
-                xml = archive.read('content.xml')
-                if b'<!DOCTYPE' in xml.upper() or b'<!ENTITY' in xml.upper():
-                    raise ValueError('Diese XML-Struktur wird nicht unterstützt.')
-                ns = {'t':'urn:oasis:names:tc:opendocument:xmlns:table:1.0',
-                      'o':'urn:oasis:names:tc:opendocument:xmlns:office:1.0',
-                      'x':'urn:oasis:names:tc:opendocument:xmlns:text:1.0'}
-                root = ET.fromstring(xml)
-                sheets = root.findall('o:body/o:spreadsheet/t:table', ns)
-                if len(sheets) != 1:
-                    raise ValueError('ODS: bitte genau ein Tabellenblatt verwenden.')
-                def q(prefix, key):
-                    return '{'+ns[prefix]+'}'+key
-                def physical_rows(parent):
-                    for child in parent:
-                        if child.tag == q('t', 'table-row'):
-                            yield child
-                        elif child.tag in {q('t', t) for t in ('table-header-rows','table-rows','table-row-group')}:
-                            yield from physical_rows(child)
-                table = []
-                row_position = 0
-                for row in physical_rows(sheets[0]):
-                    repeat = int(row.get(q('t','number-rows-repeated'), '1'))
-                    if repeat < 1:
-                        raise ValueError('Ungültige Zeilenwiederholung.')
-                    values = []
-                    col = 0
-                    for cell in row:
-                        if cell.tag not in {q('t','table-cell'),q('t','covered-table-cell')}:
-                            continue
-                        count = int(cell.get(q('t','number-columns-repeated'), '1'))
-                        if count < 1:
-                            raise ValueError('Ungültige Spaltenwiederholung.')
-                        kind = cell.get(q('o','value-type'))
-                        value = cell.get(q('o','date-value')) if kind == 'date' else cell.get(q('o','value')) if kind in ('float','percentage','currency') else '\n'.join(''.join(p.itertext()) for p in cell.findall('x:p', ns))
-                        formula = cell.get(q('t','formula'))
-                        if formula:
-                            value = {'formula':formula}
-                        if value and col + count > 40:
-                            raise ValueError('Bitte höchstens 40 Spalten verwenden.')
-                        values += [value] * min(count, max(0, 40-col))
-                        col += count
-                    if any(v not in ('', None) for v in values):
-                        if row_position + repeat > limit:
-                            raise ValueError('Zu viele Tabellenzeilen.')
-                        table += [[None]*40 for _ in range(row_position-len(table))]
-                        table += [list(values) for _ in range(repeat)]
-                    row_position += repeat
-            else:
-                from openpyxl import load_workbook
-                book = load_workbook(io.BytesIO(data), read_only=True, data_only=False, keep_links=False)
-                try:
-                    sheets = [s for s in book.worksheets if s.sheet_state == 'visible']
-                    if len(sheets) != 1:
-                        raise ValueError('Excel: bitte genau ein sichtbares Tabellenblatt verwenden.')
-                    sheet = sheets[0]
-                    if (sheet.max_column or 0) > 40 or (sheet.max_row or 0) > limit:
-                        raise ValueError('Zu viele Zeilen oder Spalten in der Excel-Datei.')
-                    table = [[{'formula':c.value} if c.data_type == 'f' else c.value for c in row]
-                             for row in sheet.iter_rows(max_row=sheet.max_row or limit, max_col=sheet.max_column or 40)]
-                finally:
-                    book.close()
-    else:
-        raise ValueError('Bitte XLSX, ODS oder CSV hochladen. Ein PDF oder Foto enthält hier keine automatisch lesbare Testtabelle.')
-    if len(table) > limit or any(len(row) > 40 for row in table):
-        raise ValueError('Bitte höchstens 1000 Personen und 40 Spalten verwenden.')
-    return table
+    return read_table_cells(data, filename)
 def read_roster_file(data, filename, identities):
     table = roster_table(data, filename)
     aliases = {roster_header(label):label for label in ROSTER_LABELS}
@@ -1555,13 +1472,47 @@ def roster_sync_grid(key):
                 if label in ROSTER_LABELS or label == 'Zuordnung':
                     draft[int(index)][label] = field_text(value)
     st.session_state.roster_draft = draft
+def upload_backup_done(candidate, revision):
+    st.session_state.kader_db = candidate
+    st.session_state.kader_revision = revision
+    st.session_state.edit_epoch = st.session_state.get('edit_epoch',0)+1
+    for key in list(st.session_state):
+        if key.startswith(('roster_', 'field_', 'training_te_', 'athlete_selection')):
+            st.session_state.pop(key,None)
+    st.session_state.save_notice = f"Kader übernommen: {sum(len(v) for v in candidate.values())} Personen."
+    st.session_state.navigations_status = 'Operativ'
+    st.rerun()
+
+
+def render_uploaded_backup(raw):
+    render_backup_preview(raw,st.session_state.kader_db,st.session_state.kader_revision,
+        lambda data: decode_backup(data,validate_kader),restore_kader_backup,
+        speichere_kader_in_datei,upload_backup_done)
+
+
 def render_roster_import():
     st.button('Zur Trainingsplanung', on_click=navigiere, args=('Operativ',))
-    st.markdown('**Datei auswählen → Vorschau kontrollieren → In den Kader übernehmen.**')
+    st.subheader('Kaderdaten hochladen')
+    st.caption(UPLOAD_HELP)
     identities = field_identity_map(st.session_state.kader_db)
     draft = st.session_state.get('roster_draft')
     with st.expander('1. Datei auswählen', expanded=draft is None):
-        upload = st.file_uploader('Ausgefüllte Stammdaten- und Testtabelle',type=['xlsx','ods','csv'],key='roster_upload')
+        upload = st.file_uploader(UPLOAD_LABEL,key='kader_upload')
+        upload_id = hashlib.sha256(upload.name.encode()+upload.getvalue()).hexdigest() if upload is not None else None
+        previous_id = st.session_state.get('kader_upload_id')
+        if upload_id != previous_id:
+            for state_key in ('roster_draft','roster_preview','roster_receipt','roster_pending','roster_file_signature'):
+                st.session_state.pop(state_key,None)
+            st.session_state.kader_upload_id = upload_id
+        if upload is not None:
+            try:
+                kind = upload_kind(upload.getvalue(),upload.name)
+            except ValueError as exc:
+                st.error(str(exc));return
+            if kind == 'backup':
+                render_uploaded_backup(upload.getvalue());return
+            if kind == 'pdf':
+                st.info('PDF-Tabelle erkannt. Bitte jede erkannte Zeile in der Vorschau prüfen; fehlende Angaben ergänzen.')
         signature = hashlib.sha256(upload.name.encode()+upload.getvalue()).hexdigest() if upload is not None else None
         if upload is None:
             st.session_state.pop('roster_file_signature',None)
@@ -1668,7 +1619,7 @@ def render_roster_import():
         if known_names:
             st.write(f"**{len(known_names)} vorhandene Profile:** "+', '.join(known_names))
     with action_area.container():
-        if st.button('In den Kader übernehmen',disabled=bool(checked.get('error')) or not checked['changed'],type='primary'):
+        if st.button('Kader übernehmen',disabled=bool(checked.get('error')) or not checked['changed'],type='primary'):
             try:
                 if checked['revision'] != st.session_state.kader_revision:
                     raise StorageConflict('Der Kader hat sich seit der Vorschau geändert. Bitte den gespeicherten Stand neu laden.')
@@ -2659,8 +2610,13 @@ def render_training():
     with person_column:
         selection=select_person('training')
     if selection is None:
-        st.info('Zuerst einen Athleten anlegen oder unter Tests / Import eine Liste einlesen.')
-        render_athlete_editor()
+        if st.session_state.auth_modus == 'trainer':
+            st.info('Noch keine Personen gespeichert. Hier kannst du deine bisherigen Kaderdaten hochladen.')
+            render_roster_import()
+            with st.expander('Oder eine Person von Hand anlegen'):
+                render_athlete_editor()
+        else:
+            st.info('Noch keine Personen gespeichert. Der Trainer kann den Kader hochladen.')
         return
     sport,name,stored=selection
     record,assignment,_=current_assignment(stored)
@@ -2818,17 +2774,7 @@ def render_backup():
     if st.button('Gespeicherten Stand neu laden'):
         try:reload_saved();st.rerun()
         except (ValueError,OSError,sqlite3.Error,StorageError) as exc:st.error(str(exc))
-    upload=st.file_uploader('Kader aus Backup laden',type=['json'])
-    if upload is not None:
-        confirmed=st.checkbox('Enthaltene Kaderdaten durch die Sicherung ersetzen')
-        if st.button('Backup jetzt wiederherstellen',disabled=not confirmed):
-            try:
-                candidate=restore_kader_backup(decode_backup(upload.getvalue(),validate_kader),st.session_state.kader_db)
-                rev=speichere_kader_in_datei(candidate,st.session_state.kader_revision)
-                st.session_state.kader_db=candidate;st.session_state.kader_revision=rev
-                st.session_state.edit_epoch=st.session_state.get('edit_epoch',0)+1
-                st.session_state.save_notice='Kader wiederhergestellt.';st.rerun()
-            except (ValueError,OSError,sqlite3.Error,StorageError,StorageConflict) as exc:st.error(str(exc))
+    render_roster_import()
 
 
 def generate_unit(record, focus, te, name="Athlet"):
@@ -3178,7 +3124,7 @@ def navigiere(ziel):
     st.session_state.navigations_status = ziel
 
 # APP_ROUTING
-navigation=[('Training','Operativ'),('Athleten','Athleten'),('Tests / Import','Testtabelle'),('Datensicherung','Backup')]
+navigation=[('Training','Operativ'),('Athleten','Athleten'),('Kaderdaten hochladen','Testtabelle'),('Datensicherung','Backup')]
 if st.session_state.auth_modus=='gast':
     navigation=[item for item in navigation if item[1] not in ('Testtabelle','Backup')]
 nav_columns=st.columns(len(navigation)+1)
